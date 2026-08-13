@@ -92,9 +92,13 @@ class AIContextService:
         
     async def form_question_instruction(self, user_id: int) -> str:        
         user: User = await self.user_repository.find_by_id(user_id)
-        course: int = datetime.now().year - user.group.year
+        if (datetime.now().year - user.group.year) == 0:
+            course = 1
+        else:
+            course: int = datetime.now().year - user.group.year 
 
-        student_progress: StudentProgress = await self.student_progress_repository.find_by_id(user_id)
+        student_progress: list = await self.student_progress_repository.find_by_student_id(user_id)
+        student_progress = student_progress[0]
         matrix_skill_id: int = student_progress.skill_id
         matrix: SkillMatrix = await self.matrix_repository.find_by_id(matrix_skill_id)
         matrix_skill: str = matrix.skill 
