@@ -77,4 +77,3 @@ class UserService:
                 )
   
                 await self.student_progress_repository.save(progress)
-

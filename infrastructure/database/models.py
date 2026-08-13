@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import BigInteger, Text, ForeignKey, String, Boolean, DateTime, func
+from sqlalchemy import BigInteger, Text, ForeignKey, String, Boolean, DateTime, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from infrastructure.database.connection import Base 
 
@@ -28,6 +28,7 @@ class SpecialtyModel(Base):
 
 class GroupModel(Base):
     __tablename__ = 'groups'
+    __table_args__ = (UniqueConstraint('year', 'specialty_id', 'group_number'),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     year: Mapped[int] = mapped_column(BigInteger)
@@ -69,22 +70,38 @@ class DialogModel(Base):
 
     user: Mapped["UserModel"] = relationship("UserModel", back_populates='dialog')
 
+class DeciplineModel(Base):
+    __tablename__ = 'deciplines'
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    specialty_id: Mapped[int] = mapped_column(ForeignKey('specialties.id'))
+    course: Mapped[int] = mapped_column(BigInteger)
+
 
 class SkillMatrixModel(Base):
     __tablename__ = 'skills'
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     specialty_id: Mapped[int] = mapped_column(ForeignKey('specialties.id'))
+    enroll_year: Mapped[int] = mapped_column(BigInteger)
     course: Mapped[int] = mapped_column(BigInteger)
+    decipline_id: Mapped[int] = mapped_column(ForeignKey('deciplines.id'))
+    learn_order: Mapped[int] = mapped_column(BigInteger)
     skill: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     criterions: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=False)
+
 
     specialty: Mapped["SpecialtyModel"] = relationship("SpecialtyModel", back_populates='skill')
+    decipline: Mapped["DeciplineModel"] = relationship("DeciplineModel", back_populates='skill')
 
 
 class StudentProgressModel(Base):
-    __tablename__ = 'student_progress' 
+    __tablename__ = 'student_progress'     
+    __table_args__ = (UniqueConstraint('student_id', 'skill_id', name='uq_student_skill'),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
