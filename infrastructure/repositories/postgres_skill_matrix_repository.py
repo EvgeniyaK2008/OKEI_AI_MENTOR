@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from application.repositories.skill_matrix_repository import SkillMatrixRepository
 from domain.entities.skill_matrix import SkillMatrix
-from infrastructure.database.models import SkillMatrixModel
+from infrastructure.database.models import SkillMatrixModel, StudentProgressModel
 from exceptions import SkillNotFound
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,17 @@ class AsyncPostgresSkillMatrixRepository(SkillMatrixRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    def _to_domain(self, orm_model: SkillMatrixModel) -> SkillMatrix:
+        return SkillMatrix(
+            id=orm_model.id, 
+            specialty_id=orm_model.specialty_id,
+            course=orm_model.course,
+            skill=orm_model.skill,
+            description=orm_model.description,
+            criterions=orm_model.criterions,
+            learn_order=orm_model.learn_order
+        ) 
+
     async def save(self, skill: SkillMatrix) -> SkillMatrix:
         try:
             db_skill = SkillMatrixModel(
@@ -21,7 +32,8 @@ class AsyncPostgresSkillMatrixRepository(SkillMatrixRepository):
                 course=skill.course,
                 skill=skill.skill,
                 description=skill.description,
-                criterions=skill.criterions
+                criterions=skill.criterions,
+                learn_order=skill.learn_order
             )
             self.session.add(db_skill)
             await self.session.commit()
@@ -47,7 +59,8 @@ class AsyncPostgresSkillMatrixRepository(SkillMatrixRepository):
             course=row.course,
             skill=row.skill,
             description=row.description,
-            criterions=row.criterions
+            criterions=row.criterions,
+            learn_order=row.learn_order
         )
         skill_entity.id = row.id
         return skill_entity
@@ -69,11 +82,36 @@ class AsyncPostgresSkillMatrixRepository(SkillMatrixRepository):
                 course=row.course,
                 skill=row.skill,
                 description=row.description,
-                criterions=row.criterions
+                criterions=row.criterions,
+                learn_order=row.learn_order
             )
             skill_entity.id = row.id
             skills.append(skill_entity)
         return skills
+
+    async def find_skills_with_progress(self, specialty_id: int, student_id: int) -> list[tuple[SkillMatrix, int]]:
+        try:
+            stmt = (
+                select(SkillMatrixModel, StudentProgressModel.level)
+                .outerjoin(
+                    StudentProgressModel, 
+                    (StudentProgressModel.skill_id == SkillMatrixModel.id) &
+                    (StudentProgressModel.student_id == student_id)
+                )
+                .where(SkillMatrixModel.specialty_id == specialty_id)
+                .order_by(SkillMatrixModel.learn_order)
+            )
+            result = await self.session.execute(stmt)
+            rows = result.all()
+            return[
+                (self._to_domain(skill), progress_level or 0)
+                for skill, progress_level in rows
+
+            ]
+        except Exception as e:
+            await self.session.rollback()
+            logger.error(f"Couldn't find skills: {e}")
+            raise
 
     async def delete(self, skill_id: int) -> bool:
         try:
@@ -100,7 +138,8 @@ class AsyncPostgresSkillMatrixRepository(SkillMatrixRepository):
                     course=skill.course,
                     skill=skill.skill,
                     description=skill.description,
-                    criterions=skill.criterions
+                    criterions=skill.criterions,
+                    learn_order=skill.learn_order
                 )
             )
             await self.session.execute(stmt)

@@ -5,6 +5,7 @@ from sqlalchemy.orm import joinedload
 from domain.exceptions.errors import UserNotFound
 from application.repositories.user_repository import UserRepository
 from domain.entities.user import User, UserRole
+from domain.entities.study import Groups, Specialty
 from infrastructure.database.models import UserModel, GroupModel, SpecialtyModel 
 
 logger = logging.getLogger(__name__)
@@ -13,10 +14,43 @@ class AsyncPostgresUserRepository(UserRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
     
+    def _to_domain(self, db_user: UserModel) -> User:
+        group = None
+        if db_user.group is not None:
+            specialty = None
+            if hasattr(db_user.group, 'specialty') and db_user.group.specialty is not None:
+                specialty = Specialty(
+                    id=db_user.group.specialty.id,
+                    code=db_user.group.specialty.code,
+                    short_name=db_user.group.specialty.short_name,
+                    full_name=db_user.group.specialty.full_name,
+                )
+            group = Groups(
+                id=db_user.group.id,
+                year=db_user.group.year,
+                specialty=specialty,
+                group_number=db_user.group.group_number,
+                is_active=db_user.group.is_active,
+            )
+
+        return User(
+            id=db_user.id,
+            username=db_user.username,
+            hashed_password=db_user.hashed_password,
+            first_name=db_user.first_name,
+            middle_name=db_user.middle_name,
+            last_name=db_user.last_name,
+            role=UserRole(db_user.role),
+            group=group
+        )
+    
     async def find_by_id(self, user_id: int) -> User | None:
         result = await self.session.execute(
             select(UserModel)
-            .options(joinedload(UserModel.group))
+            .options(
+                joinedload(UserModel.group)
+                .joinedload(GroupModel.specialty)
+            )
             .where(UserModel.id == user_id)
         )
         db_user = result.scalar_one_or_none()
@@ -24,16 +58,7 @@ class AsyncPostgresUserRepository(UserRepository):
         if not db_user:
             return None
         
-        return User(
-            id=db_user.id,
-            username=db_user.username,       
-            hashed_password=db_user.hashed_password, 
-            first_name=db_user.first_name,
-            middle_name=db_user.middle_name,
-            last_name=db_user.last_name,
-            role=UserRole(db_user.role),
-            group=db_user.group 
-        )
+        return self._to_domain(db_user)
 
     async def find_by_username(self, username: str) -> User | None:
         result = await self.session.execute(
@@ -48,16 +73,7 @@ class AsyncPostgresUserRepository(UserRepository):
         if not db_user:
             return None
             
-        return User(
-            id=db_user.id,
-            username=db_user.username,
-            hashed_password=db_user.hashed_password,
-            first_name=db_user.first_name,
-            middle_name=db_user.middle_name,
-            last_name=db_user.last_name,
-            role=UserRole(db_user.role),
-            group=db_user.group
-        )
+        return self._to_domain(db_user)
 
     async def save(self, user: User) -> User:
         db_user = UserModel(

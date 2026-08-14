@@ -11,6 +11,7 @@ class SkillMatrix:
     skill: str = None
     description: str = None
     criterions: str = None
+    learn_order: int = None
 
     def get_specialization(self):
         return self.Specialty

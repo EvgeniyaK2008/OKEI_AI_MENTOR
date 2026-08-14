@@ -17,6 +17,7 @@ from application.repositories.group_repository import GroupRepository
 from application.repositories.student_progress_repository import StudentProgressRepository
 from application.repositories.user_repository import UserRepository
 from application.repositories.specialty_repository import SpecialtyRepository
+from application.use_cases.get_skill_for_student import GetSkillForStudent
 from config.config import Config
 from datetime import datetime, timezone
 
@@ -91,6 +92,7 @@ async def get_user_repo(db: AsyncSession = Depends(get_db)):
 async def get_specialty_repo(db: AsyncSession = Depends(get_db)):
     return AsyncPostgresSpecialtyRepository(db)
 
+
 async def get_ai_service(db: AsyncSession = Depends(get_db)):
     return AIContextService(
         dialog_service = DialogService(AsyncPostgresDialogRepository(db)),
@@ -100,7 +102,8 @@ async def get_ai_service(db: AsyncSession = Depends(get_db)):
         student_progress_repository = AsyncPostgresStudentProgressRepository(db),
         user_repository = AsyncPostgresUserRepository(db),
         speciality_repository = AsyncPostgresSpecialtyRepository(db),
-        instruction = config.ai_instruction
+        instruction = config.ai_instruction,
+        get_skill_for_student=GetSkillForStudent(AsyncPostgresStudentProgressRepository(db), AsyncPostgresSkillMatrixRepository(db), AsyncPostgresUserRepository(db))
     )
 
 

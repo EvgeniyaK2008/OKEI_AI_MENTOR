@@ -64,7 +64,7 @@ class DialogModel(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     user_message: Mapped[str] = mapped_column(Text)
     ai_response: Mapped[str] = mapped_column(Text) 
-    question_id: Mapped[int | None] = mapped_column(BigInteger)
+    question_id: Mapped[int | None] = mapped_column(Text)
     user_message_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     ai_response_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -78,6 +78,7 @@ class DeciplineModel(Base):
     specialty_id: Mapped[int] = mapped_column(ForeignKey('specialties.id'))
     course: Mapped[int] = mapped_column(BigInteger)
 
+    skill: Mapped[list["SkillMatrixModel"]] = relationship(back_populates="decipline")
 
 class SkillMatrixModel(Base):
     __tablename__ = 'skills'

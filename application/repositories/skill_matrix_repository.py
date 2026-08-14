@@ -19,4 +19,12 @@ class SkillMatrixRepository(ABC):
     @abstractmethod
     async def find_by_course_and_specialty(self, course: int, specialty_id: int) -> List[SkillMatrix]:
         pass
+
+    @abstractmethod
+    async def find_skills_with_progress(
+        self, 
+        specialty_id: int,
+        student_id: int
+    ) -> list[tuple[SkillMatrix, int]]:
+        pass
     

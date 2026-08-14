@@ -5,7 +5,7 @@ from application.repositories.skill_matrix_repository import SkillMatrixReposito
 from application.repositories.student_progress_repository import StudentProgressRepository
 from application.repositories.user_repository import UserRepository
 from application.repositories.specialty_repository import SpecialtyRepository
-
+from application.use_cases.get_skill_for_student import GetSkillForStudent
 
 from domain.entities.session import Session
 from domain.entities.skill_matrix import SkillMatrix
@@ -30,7 +30,8 @@ class AIContextService:
             student_progress_repository: StudentProgressRepository,
             user_repository: UserRepository,
             speciality_repository: SpecialtyRepository,
-            instruction: str
+            instruction: str,
+            get_skill_for_student: GetSkillForStudent
             ):
         self.dialog_service = dialog_service
         self.dialog_repository = dialog_repository
@@ -40,6 +41,7 @@ class AIContextService:
         self.matrix_repository = matrix_repository
         self.user_repository = user_repository
         self.speciality_repository = speciality_repository
+        self.get_skill_for_student = get_skill_for_student
 
     async def get_response_with_history(self, user_id: int, user_message: str):
         dialogs = await self.dialog_service.get_user_history(user_id, limit=10)
@@ -59,14 +61,14 @@ class AIContextService:
         question = await self.ai_service.generate_task(prompt)
         question_id = str(uuid.uuid4())
 
-        self.dialog_service.save(
+        await self.dialog_service.save(
             user_id=user_id,
             user_message="",
             ai_response=question,
             question_id=question_id,
             user_message_time=None,
             ai_response_time=datetime.now()
-            ) 
+            )
 
         return question
 
@@ -88,7 +90,7 @@ class AIContextService:
             weaknesses=result['weaknesses']
         )
 
-        await self.student_progress_repository.save(student_progress=student_progress)
+        await self.student_progress_repository.upsert(student_progress=student_progress)
         
     async def form_question_instruction(self, user_id: int) -> str:        
         user: User = await self.user_repository.find_by_id(user_id)
@@ -97,14 +99,15 @@ class AIContextService:
         else:
             course: int = datetime.now().year - user.group.year 
 
-        student_progress: list = await self.student_progress_repository.find_by_student_id(user_id)
-        student_progress = student_progress[0]
-        matrix_skill_id: int = student_progress.skill_id
-        matrix: SkillMatrix = await self.matrix_repository.find_by_id(matrix_skill_id)
+        matrix: SkillMatrix = await self.get_skill_for_student.execute(user_id)
         matrix_skill: str = matrix.skill 
         matrix_criterion: str = matrix.criterions
-        student_progress_level: int = student_progress.level
-        weaknesses: str = student_progress.weaknesses
+        student_progress: StudentProgress | None = await self.student_progress_repository.find_by_student_and_skill(student_id=user_id, skill_id=matrix.id)
+        student_progress_level: int = 0
+        weaknesses: str = ""
+        if student_progress is not None:
+            student_progress_level = student_progress.level
+            weaknesses = student_progress.weaknesses
         speciality: Specialty = await self.speciality_repository.find_by_id(matrix.specialty_id)
 
         question_instruction = f"""

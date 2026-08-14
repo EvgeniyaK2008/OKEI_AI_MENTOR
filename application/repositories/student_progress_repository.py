@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import List, Optional
 from domain.entities.user import User
 from domain.entities.student_progress import StudentProgress
 
@@ -13,5 +14,9 @@ class StudentProgressRepository(ABC):
         pass
 
     @abstractmethod
-    async def find_by_student_and_skill(self, student_id: int, skill_id: int) -> StudentProgress | None:
+    async def find_by_student_and_skill(self, student_id: int, skill_id: int) -> Optional[StudentProgress]:
+        pass
+
+    @abstractmethod
+    async def find_by_student_id(self, student_id: int) -> List[StudentProgress]:
         pass

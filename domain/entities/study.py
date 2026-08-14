@@ -27,8 +27,8 @@ class Groups:
     is_active: bool = False
     
 
-    def get_specialty(self):
-        return self.specialty
+    def get_specialty_id(self) -> int:
+        return self.specialty.id
     
     def get_course(self):
         return self.course

@@ -9,8 +9,9 @@ class StudentProgress:
     skill_id: int = None
     level: int = None
     weaknesses: str = None
+    learn_order: int = None
 
-    def get_weaknesses(self):
-        return self.weaknesses
+    def is_mastered(self) -> bool:
+        return (self.level or 0) >= 100
 
     
