@@ -83,11 +83,17 @@ async def get_user_service(db: AsyncSession = Depends(get_db)):
 async def get_group_repo(db: AsyncSession = Depends(get_db)):
     return AsyncPostgresGroupRepository(db)
 
+async def get_student_progress_repo(db: AsyncSession = Depends(get_db)):
+    return AsyncPostgresStudentProgressRepository(db)
+
 async def get_dialog_service(db: AsyncSession = Depends(get_db)):
     return DialogService(AsyncPostgresDialogRepository(db))
 
 async def get_user_repo(db: AsyncSession = Depends(get_db)):
     return AsyncPostgresUserRepository(db)
+
+async def get_matrix_repo(db: AsyncSession = Depends(get_db)):
+    return AsyncPostgresSkillMatrixRepository(db)
 
 async def get_specialty_repo(db: AsyncSession = Depends(get_db)):
     return AsyncPostgresSpecialtyRepository(db)
@@ -103,7 +109,10 @@ async def get_ai_service(db: AsyncSession = Depends(get_db)):
         user_repository = AsyncPostgresUserRepository(db),
         speciality_repository = AsyncPostgresSpecialtyRepository(db),
         instruction = config.ai_instruction,
-        get_skill_for_student=GetSkillForStudent(AsyncPostgresStudentProgressRepository(db), AsyncPostgresSkillMatrixRepository(db), AsyncPostgresUserRepository(db))
+        get_skill_for_student=GetSkillForStudent(
+            AsyncPostgresStudentProgressRepository(db),
+            AsyncPostgresSkillMatrixRepository(db), 
+            AsyncPostgresUserRepository(db))
     )
 
 
@@ -123,6 +132,25 @@ async def get_groups(
         })
     
     return result 
+
+@app.get('/progress')
+async def get_progress(
+    request: Request,
+    student_progress_repo: StudentProgressRepository = Depends(get_student_progress_repo),
+    matrix_repo: SkillMatrixRepository = Depends(get_matrix_repo)
+):
+    current_user = get_current_user(request)
+    user_id = current_user["user_id"]
+    student_progress: List[StudentProgress] = await student_progress_repo.find_by_student_id(user_id)
+
+    result = []
+    for el in student_progress:
+        skill = await matrix_repo.find_by_id(el.skill_id)
+        result.append({
+                    "skill": skill.skill, 
+                    "level": el.level
+                })
+    return result
 
 @app.post('/register')
 async def register(
