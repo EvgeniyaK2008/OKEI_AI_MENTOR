@@ -103,7 +103,7 @@ async def get_ai_service(db: AsyncSession = Depends(get_db)):
     return AIContextService(
         dialog_service = DialogService(AsyncPostgresDialogRepository(db)),
         dialog_repository = AsyncPostgresDialogRepository(db),
-        ai_service = QwenAIService(),
+        ai_service = YandexAIService(config),
         matrix_repository = AsyncPostgresSkillMatrixRepository(db),
         student_progress_repository = AsyncPostgresStudentProgressRepository(db),
         user_repository = AsyncPostgresUserRepository(db),
@@ -150,6 +150,9 @@ async def get_progress(
                     "skill": skill.skill, 
                     "level": el.level
                 })
+
+    print("_"*10)
+    print(result)
     return result
 
 @app.post('/register')
@@ -239,8 +242,8 @@ async def chat(
     print("-"*100 + f"\n{data.message}")
 
     if data.message == '/task':
-        ai_task = await ai_service.start_skill_session(user_id)
-        result = {"message": ai_task}
+        ai_task, prompt= await ai_service.start_skill_session(user_id)
+        result = {"success": True, "message": prompt + ai_task }
     else:
         ai_response = await ai_service.get_response_with_history(user_id=user_id, user_message=user_message)
         ai_response_time = datetime.now()

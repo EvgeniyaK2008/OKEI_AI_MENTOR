@@ -70,7 +70,7 @@ class AIContextService:
             ai_response_time=datetime.now()
             )
 
-        return question
+        return question, prompt
 
     async def evaluate_answer(
         self, 

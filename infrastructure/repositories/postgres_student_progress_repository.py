@@ -32,6 +32,29 @@ class AsyncPostgresStudentProgressRepository(StudentProgressRepository):
             logger.error(f"Couldn't save student progress: {e}")
             raise
 
+    async def upsert(self, progress: StudentProgress) -> StudentProgress:
+        stmt = (
+            insert(StudentProgressModel)
+            .values(
+                student_id=progress.student_id,
+                skill_id=progress.skill_id,
+                level=progress.level,
+                weaknesses=progress.weaknesses,
+            )
+            .on_conflict_do_update(
+                index_elements=['student_id', 'skill_id'],
+                set_={
+                    'level':progress.level,
+                    'weaknesses': progress.weaknesses,
+                }
+            )
+            .returning(StudentProgressModel)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        row = result.scalar_one()
+        return self._to_domain(row)
+
     async def find_by_student_id(self, student_id: int) -> List[StudentProgress]:
         result = await self.session.execute(
             select(StudentProgressModel).where(StudentProgressModel.student_id == student_id)

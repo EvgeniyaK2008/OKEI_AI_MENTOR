@@ -30,7 +30,7 @@ class YandexAIService(AIService):
         full_input = context_str + f"user: {user_message}"
 
         response = self.client.responses.create(
-            model=f"gpt://{self.client.project}/{self.ai_model}",
+            model=self.ai_model,
             temperature=self.ai_temperature,
             max_output_tokens=self.ai_max_tokens,
             input=full_input
@@ -47,10 +47,10 @@ class YandexAIService(AIService):
         return response.output_text
     
     async def generate_task(self, prompt: str) -> str:
-        response = await self.client.responses.create(
+        response = self.client.responses.create(
             model=self.ai_model,
             temperature=self.ai_temperature,
-            max_tokens=self.ai_max_tokens,
-            messages=[{"role": "user", "content": prompt}]
+            max_output_tokens=self.ai_max_tokens,
+            input=[{"role": "user", "content": prompt}]
         )
         return response.output_text
