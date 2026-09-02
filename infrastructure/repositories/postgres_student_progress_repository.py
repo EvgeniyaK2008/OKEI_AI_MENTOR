@@ -1,6 +1,7 @@
 import logging
 from typing import List, Optional
 from sqlalchemy import select, update, delete
+from sqlalchemy.dialects.postgresql import insert 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application.repositories.student_progress_repository import StudentProgressRepository
@@ -13,6 +14,15 @@ logger = logging.getLogger(__name__)
 class AsyncPostgresStudentProgressRepository(StudentProgressRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    def _to_domain(self, orm_model: StudentProgressModel) -> StudentProgress:
+        return StudentProgress(
+            id=orm_model.id,
+            student_id=orm_model.student_id,
+            skill_id=orm_model.skill_id,
+            level=orm_model.level,
+            weaknesses=orm_model.weaknesses
+        )
 
     async def save(self, student_progress: StudentProgress) -> StudentProgress:
         try:
@@ -44,7 +54,7 @@ class AsyncPostgresStudentProgressRepository(StudentProgressRepository):
             .on_conflict_do_update(
                 index_elements=['student_id', 'skill_id'],
                 set_={
-                    'level':progress.level,
+                    'level': progress.level,
                     'weaknesses': progress.weaknesses,
                 }
             )
@@ -60,15 +70,7 @@ class AsyncPostgresStudentProgressRepository(StudentProgressRepository):
             select(StudentProgressModel).where(StudentProgressModel.student_id == student_id)
         )
         rows = result.scalars().all()
-        return [
-            StudentProgress(
-                student_id=r.student_id,
-                skill_id=r.skill_id,
-                level=r.level,
-                weaknesses=r.weaknesses,
-                id=r.id
-            ) for r in rows
-        ]
+        return [self._to_domain(r) for r in rows]
 
     async def find_by_id(self, progress_id: int) -> Optional[StudentProgress]:
         result = await self.session.execute(
@@ -76,15 +78,9 @@ class AsyncPostgresStudentProgressRepository(StudentProgressRepository):
         )
         row = result.scalar_one_or_none()
         if not row:
-            raise StudentProgressNotFound(id= progress_id)
+            raise StudentProgressNotFound(id=progress_id)
         
-        return StudentProgress(
-            student_id=row.student_id,
-            skill_id=row.skill_id,
-            level=row.level,
-            weaknesses=row.weaknesses,
-            id=row.id
-        )
+        return self._to_domain(row)
 
     async def find_by_student_and_skill(self, student_id: int, skill_id: int) -> Optional[StudentProgress]:
         result = await self.session.execute(
@@ -97,10 +93,4 @@ class AsyncPostgresStudentProgressRepository(StudentProgressRepository):
         if not row:
             return None
             
-        return StudentProgress(
-            student_id=row.student_id,
-            skill_id=row.skill_id,
-            level=row.level,
-            weaknesses=row.weaknesses,
-            id=row.id
-        )
+        return self._to_domain(row)

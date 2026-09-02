@@ -20,3 +20,7 @@ class StudentProgressRepository(ABC):
     @abstractmethod
     async def find_by_student_id(self, student_id: int) -> List[StudentProgress]:
         pass
+
+    @abstractmethod
+    async def upsert(self, progress: StudentProgress) -> StudentProgress:
+        pass

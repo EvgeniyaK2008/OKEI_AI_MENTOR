@@ -78,6 +78,7 @@ async def get_user_service(db: AsyncSession = Depends(get_db)):
     skill_repo = AsyncPostgresSkillMatrixRepository(db)
     progress_repo = AsyncPostgresStudentProgressRepository(db)
 
+
     return UserService(user_repo, skill_repo, progress_repo)
 
 async def get_group_repo(db: AsyncSession = Depends(get_db)):
@@ -242,8 +243,9 @@ async def chat(
     print("-"*100 + f"\n{data.message}")
 
     if data.message == '/task':
-        ai_task, prompt= await ai_service.start_skill_session(user_id)
+        ai_task, prompt, question_id = await ai_service.start_skill_session(user_id)
         result = {"success": True, "message": prompt + ai_task }
+        await ai_service.evaluate_answer(question_id=question_id, user_id=user_id, user_message_time=user_message_time)
     else:
         ai_response = await ai_service.get_response_with_history(user_id=user_id, user_message=user_message)
         ai_response_time = datetime.now()

@@ -1,3 +1,8 @@
+import re
+from typing import List
+
+from fastapi import logger
+
 from application.services.dialog_service import DialogService
 from application.repositories.dialog_repository import DialogRepository
 from application.ports.ai.ai_port import AIService
@@ -70,7 +75,7 @@ class AIContextService:
             ai_response_time=datetime.now()
             )
 
-        return question, prompt
+        return question, prompt, question_id
 
     async def evaluate_answer(
         self, 
@@ -79,9 +84,9 @@ class AIContextService:
         user_message_time: datetime = None,
         ):
 
-        question_history: list = await self.dialog_repository.get_user_history(user_id=user_id, limit=500, question_id=question_id)
+        question_history: List[Dialog] = await self.dialog_service.get_user_history(user_id=user_id, limit=500, question_id=question_id)
 
-        result = self.get_student_result(question_history=question_history)
+        result = await self.get_student_result(question_history=question_history)
 
         student_progress = StudentProgress(
             student_id=user_id,
@@ -90,7 +95,7 @@ class AIContextService:
             weaknesses=result['weaknesses']
         )
 
-        await self.student_progress_repository.upsert(student_progress=student_progress)
+        await self.student_progress_repository.upsert(progress=student_progress)
         
     async def form_question_instruction(self, user_id: int) -> str:        
         user: User = await self.user_repository.find_by_id(user_id)
@@ -121,7 +126,7 @@ class AIContextService:
         {matrix_criterion}
 
         Требования:
-        1. Задание должно быть практическим
+        1. Задание должно быть практикоориентированным если это практический навык и открытый вопрос если теория
         2. Уровень сложности должен соответствовать {course} курсу
         3. В конце напиши критерии, по которым будет оцениваться решение
 
@@ -141,19 +146,15 @@ class AIContextService:
         weaknesses = re.sub(r'^[%\s-]+', '', weaknesses)
         return percentage, weaknesses
 
-    async def get_student_result(self, question_history: list) -> dict:
-        if not question_history:
-            raise NoDataError
-
+    async def get_student_result(self, question_history: List[Dialog]) -> dict:
         dialog = question_history[0]
         dialog: Dialog = await self.dialog_repository.find_by_id(dialog.id)
         user_id: int = dialog.user_id
 
-        student_progress: StudentProgress = await self.student_progress_repository.find_by_id(user_id)
-        matrix_skill_id: int = student_progress.skill_id
-        matrix: SkillMatrix = await self.matrix_repository.find_by_id(matrix_skill_id)
+        matrix: SkillMatrix = await self.get_skill_for_student.execute(student_id=user_id)
 
         skill: str = matrix.skill
+        skill_id: int = matrix.id
         criterions: str = matrix.criterions 
          
         result_instruction =  f"""Оцени усвоение темы студентом по стобалльной шкале. 
@@ -177,20 +178,23 @@ class AIContextService:
         
         history_text = ""
         for message in question_history:
-            role = message["role"]
-            content = message["content"]
+            role = "user"
+            content = message.user_message
+            history_text += f"{role}: {content}\n"
+            role = "assistant"
+            content = message.ai_response
             history_text += f"{role}: {content}\n"
 
         content = result_instruction + "\n\n" + history_text
 
         ai_answer = await self.ai_service.get_simple_response(user_message=content)  
         
-        progress, weaknesses = self._parse_ai_result(ai_answer)
+        level, weaknesses = self._parse_ai_result(ai_answer)
 
         result = {
-            'progress': progress,
+            'level': level,
             'weaknesses': weaknesses,
-            'skill': skill
+            'skill': skill_id
         }
 
         return result

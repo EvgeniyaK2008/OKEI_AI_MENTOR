@@ -16,6 +16,7 @@ class YandexAIService(AIService):
         self.ai_model = config.ai_model
         self.ai_temperature = config.ai_temperature
         self.ai_max_tokens = config.ai_max_tokens
+        self.instructions = config.ai_instruction
 
     async def get_ai_response_with_context(self, 
         user_id: int,
@@ -33,16 +34,18 @@ class YandexAIService(AIService):
             model=self.ai_model,
             temperature=self.ai_temperature,
             max_output_tokens=self.ai_max_tokens,
-            input=full_input
+            input=full_input,
+            instructions=self.instructions
         )
         return response.output_text
     
-    async def get_simple_response(self, user_text: str) -> str:
+    async def get_simple_response(self, user_message: str) -> str:
         response = self.client.responses.create(
-            model=f"gpt://{self.client.project}/{self.ai_model}",
+            model=self.ai_model,
             temperature=self.ai_temperature,
             max_output_tokens=self.ai_max_tokens,
-            input=user_text
+            input=user_message,
+            instructions=self.instructions
         )
         return response.output_text
     
@@ -51,6 +54,7 @@ class YandexAIService(AIService):
             model=self.ai_model,
             temperature=self.ai_temperature,
             max_output_tokens=self.ai_max_tokens,
+            instructions=self.instructions,
             input=[{"role": "user", "content": prompt}]
         )
         return response.output_text

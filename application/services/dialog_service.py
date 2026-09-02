@@ -1,3 +1,5 @@
+from typing import List
+
 from application.repositories.dialog_repository import DialogRepository
 from domain.entities.dialog import Dialog
 import logging
@@ -35,8 +37,8 @@ class DialogService:
         user_id: int,
         limit: int = 10,
         question_id: int = None
-    ) -> list:
-        dialogs = await self.repository.get_recent_dialogs(
+    ) -> List[Dialog]:
+        dialogs: List[Dialog] = await self.repository.get_recent_dialogs(
             user_id=user_id, 
             limit=limit,
             question_id=question_id

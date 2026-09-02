@@ -23,7 +23,7 @@ class GetSkillForStudent:
         user: User = await self.user_repo.find_by_id(student_id)
         specialty_id: int = user.get_specialty_id()
 
-        student_skills = await self.skill_matrix_repo.find_skills_with_progress(specialty_id, user.id)
+        student_skills: list[tuple[SkillMatrix, int]] = await self.skill_matrix_repo.find_skills_with_progress(specialty_id, user.id)
 
         not_mastered = [
             (skill, progress)
