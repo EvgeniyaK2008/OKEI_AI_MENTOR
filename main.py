@@ -17,7 +17,6 @@ from application.repositories.group_repository import GroupRepository
 from application.repositories.student_progress_repository import StudentProgressRepository
 from application.repositories.user_repository import UserRepository
 from application.repositories.specialty_repository import SpecialtyRepository
-from application.use_cases.get_skill_for_student import GetSkillForStudent
 from config.config import Config
 from datetime import datetime, timezone
 
@@ -43,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from typing import Optional, Any
+from typing import Optional, Any, List
 
 from infrastructure.database.connection import get_db
 from infrastructure.repositories.postgres_user_repository import AsyncPostgresUserRepository
@@ -54,8 +53,70 @@ from infrastructure.repositories.postgres_dialog_repository import AsyncPostgres
 from infrastructure.repositories.postgres_specialty_repository import AsyncPostgresSpecialtyRepository
 from application.services.user_service import UserService
 from application.services.auth import hash_password, verify_password, create_access_token, get_current_user
-
+from application.use_cases.get_skill_for_student import GetSkillForStudent
 from presentation.web.fastapi.models import *
+
+from pydantic import BaseModel, Field
+
+
+class ProgressItem(BaseModel):
+    skill: str
+    level: int
+
+
+class GroupItem(BaseModel):
+    id: int
+    name: str
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    group_id: Optional[int] = None
+
+
+class RegisterResponse(BaseModel):
+    user_id: int
+    username: str
+
+
+class LoginUser(BaseModel):
+    id: int
+    username: str
+    first_name: str
+    middle_name: str
+    last_name: str
+    group: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    user: LoginUser
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+class ChatResponse(BaseModel):
+    message: str
+    question_id: Optional[str] = None
+
+
+class MessageItem(BaseModel):
+    id: str
+    role: str
+    content: str
+    timestamp: datetime | None = None
+
+
+class ChatHistoryResponse(BaseModel):
+    user_id: int
+    username: str
+    messages: list[MessageItem]
+
+
+# ---------- App ----------
 
 load_dotenv()
 config = Config.load()
@@ -77,15 +138,10 @@ async def get_user_service(db: AsyncSession = Depends(get_db)):
     user_repo = AsyncPostgresUserRepository(db)
     skill_repo = AsyncPostgresSkillMatrixRepository(db)
     progress_repo = AsyncPostgresStudentProgressRepository(db)
-
-
     return UserService(user_repo, skill_repo, progress_repo)
 
 async def get_group_repo(db: AsyncSession = Depends(get_db)):
     return AsyncPostgresGroupRepository(db)
-
-async def get_student_progress_repo(db: AsyncSession = Depends(get_db)):
-    return AsyncPostgresStudentProgressRepository(db)
 
 async def get_dialog_service(db: AsyncSession = Depends(get_db)):
     return DialogService(AsyncPostgresDialogRepository(db))
@@ -93,48 +149,43 @@ async def get_dialog_service(db: AsyncSession = Depends(get_db)):
 async def get_user_repo(db: AsyncSession = Depends(get_db)):
     return AsyncPostgresUserRepository(db)
 
-async def get_matrix_repo(db: AsyncSession = Depends(get_db)):
-    return AsyncPostgresSkillMatrixRepository(db)
-
 async def get_specialty_repo(db: AsyncSession = Depends(get_db)):
     return AsyncPostgresSpecialtyRepository(db)
 
+async def get_student_progress_repo(db: AsyncSession = Depends(get_db)):
+    return AsyncPostgresStudentProgressRepository(db)
+
+async def get_matrix_repo(db: AsyncSession = Depends(get_db)):
+    return AsyncPostgresSkillMatrixRepository(db)
+
 
 async def get_ai_service(db: AsyncSession = Depends(get_db)):
+    user_repo = AsyncPostgresUserRepository(db)
+    skill_matrix_repo = AsyncPostgresSkillMatrixRepository(db)
+    student_progress_repo = AsyncPostgresStudentProgressRepository(db)
+    specialty_repo = AsyncPostgresSpecialtyRepository(db)
+    dialog_repo = AsyncPostgresDialogRepository(db)
+    
+    get_skill_for_student = GetSkillForStudent(
+        student_progress_repo=student_progress_repo,
+        skill_matrix_repo=skill_matrix_repo,
+        user_repo=user_repo
+    )
+    
     return AIContextService(
-        dialog_service = DialogService(AsyncPostgresDialogRepository(db)),
-        dialog_repository = AsyncPostgresDialogRepository(db),
-        ai_service = YandexAIService(config),
-        matrix_repository = AsyncPostgresSkillMatrixRepository(db),
-        student_progress_repository = AsyncPostgresStudentProgressRepository(db),
-        user_repository = AsyncPostgresUserRepository(db),
-        speciality_repository = AsyncPostgresSpecialtyRepository(db),
-        instruction = config.ai_instruction,
-        get_skill_for_student=GetSkillForStudent(
-            AsyncPostgresStudentProgressRepository(db),
-            AsyncPostgresSkillMatrixRepository(db), 
-            AsyncPostgresUserRepository(db))
+        dialog_service=DialogService(dialog_repo),
+        dialog_repository=dialog_repo,
+        ai_service=YandexAIService(config),
+        matrix_repository=skill_matrix_repo,
+        student_progress_repository=student_progress_repo,
+        user_repository=user_repo,
+        speciality_repository=specialty_repo,
+        instruction=config.ai_instruction,
+        get_skill_for_student=get_skill_for_student
     )
 
 
-@app.get("/groups")
-async def get_groups(
-    specialty_repo: AsyncPostgresSpecialtyRepository =  Depends(get_specialty_repo),
-    group_repo: AsyncPostgresGroupRepository = Depends(get_group_repo)
-    ):
-    groups = await group_repo.find_active_groups()
-
-    result = []
-    for g in groups:
-        specialty = await specialty_repo.find_by_id(g.specialty.id)
-        result.append({
-            "id": g.id, 
-            "name": f"{g.year}-{specialty.short_name}-{g.group_number}"
-        })
-    
-    return result 
-
-@app.get('/progress')
+@app.get('/progress', response_model=list[ProgressItem])
 async def get_progress(
     request: Request,
     student_progress_repo: StudentProgressRepository = Depends(get_student_progress_repo),
@@ -142,36 +193,42 @@ async def get_progress(
 ):
     current_user = get_current_user(request)
     user_id = current_user["user_id"]
+
     student_progress: List[StudentProgress] = await student_progress_repo.find_by_student_id(user_id)
 
     result = []
     for el in student_progress:
         skill = await matrix_repo.find_by_id(el.skill_id)
-        result.append({
-                    "skill": skill.skill, 
-                    "level": el.level
-                })
-
-    print("_"*10)
-    print(result)
+        result.append(ProgressItem(skill=skill.skill, level=el.level))
     return result
 
-@app.post('/register')
+
+@app.get("/groups", response_model=list[GroupItem])
+async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_group_repo)):
+    groups = await group_repo.find_active_groups()
+
+    return [
+        GroupItem(id=g.id, name=f"{datetime.now.year - g.year}")
+        for g in groups
+    ]
+
+
+@app.post('/register', response_model=RegisterResponse)
 async def register(
     data: RegisterRequest,
     service: UserService = Depends(get_user_service),
     user_repo: UserRepository = Depends(get_user_repo),
     group_repo: AsyncPostgresGroupRepository = Depends(get_group_repo)
 ):
-    print(data.group_id, data.password, data.username)
     existing = await user_repo.find_by_username(data.username)
 
     if existing:
         return JSONResponse(
-            status_code=200,
+            status_code=400,
             content={'success': False, 'error': "Username already exists"}
         )
     
+    group = None
     if data.group_id:
         group = await group_repo.find_by_id(int(data.group_id))
 
@@ -185,13 +242,10 @@ async def register(
         last_name="test",
         group=group
     )
-    return JSONResponse({
-        "success": True,
-        "user_id": user.id,
-        "username": user.username
-    })
+    return RegisterResponse(user_id=user.id, username=user.username)
 
-@app.post('/login')
+
+@app.post('/login', response_model=LoginResponse)
 async def login_page(
     data: LoginRequest, 
     user_service: UserService = Depends(get_user_service),
@@ -213,20 +267,20 @@ async def login_page(
     specialty = await speciality_repo.find_by_id(group.specialty.id)
     group_name = str(group.year) + str(specialty.short_name) + str(group.group_number)
 
-    return JSONResponse({
-        "success": True, 
-        "token": token, 
-        "user":{
-            "id": user.id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "middle_name": user.middle_name,
-            "last_name": user.last_name,
-            "group": group_name
-        }
-    })
+    return LoginResponse(
+        token=token,
+        user=LoginUser(
+            id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+            middle_name=user.middle_name,
+            last_name=user.last_name,
+            group=group_name,
+        ),
+    )
 
-@app.post('/chat')  
+
+@app.post('/chat', response_model=ChatResponse)
 async def chat(
         request: Request,
         data: ChatRequest,
@@ -238,60 +292,51 @@ async def chat(
     user_message = data.message
     user_message_time = datetime.now()
 
-    result = {}
-
-    print("-"*100 + f"\n{data.message}")
-
     if data.message == '/task':
-        ai_task, prompt, question_id = await ai_service.start_skill_session(user_id)
-        result = {"success": True, "message": prompt + ai_task }
-        await ai_service.evaluate_answer(question_id=question_id, user_id=user_id, user_message_time=user_message_time)
-    else:
-        ai_response = await ai_service.get_response_with_history(user_id=user_id, user_message=user_message)
-        ai_response_time = datetime.now()
+        ai_task = await ai_service.start_skill_session(user_id)
+        return ChatResponse(message=str(ai_task))
 
-        await dialog_service.save(
-            user_id=user_id, 
-            user_message=user_message, 
-            ai_response=ai_response,
-            question_id = None,
-            user_message_time = user_message_time,
-            ai_response_time = ai_response_time)
+    ai_response = await ai_service.get_response_with_history(user_id=user_id, user_message=user_message)
+    ai_response_time = datetime.now()
 
-        result = {
-            "success": True,
-            "message": ai_response}
+    await dialog_service.save(
+        user_id=user_id, 
+        user_message=user_message, 
+        ai_response=ai_response,
+        question_id=None,
+        user_message_time=user_message_time,
+        ai_response_time=ai_response_time)
 
-    return result
+    return ChatResponse(message=ai_response)
 
-@app.get("/chat/history")
+
+@app.get("/chat/history", response_model=ChatHistoryResponse)
 async def get_chat_history(
     request: Request,
     dialog_service: DialogService = Depends(get_dialog_service)
     ):
     current_user = get_current_user(request)
     user_id = current_user["user_id"]
-    dialogs = await dialog_service.get_user_history(user_id=user_id, limit = 1000, question_id = None)
+    dialogs = await dialog_service.get_user_history(user_id=user_id, limit=1000, question_id=None)
     messages = []
     for dialog in dialogs:
         if dialog.user_message:  
-            messages.append({
-                "id":  f"{dialog.id}user",
-                "role": "user",
-                "content": dialog.user_message,
-                "timestamp": dialog.user_message_time
-            })
+            messages.append(MessageItem(
+                id=f"{dialog.id}user",
+                role="user",
+                content=dialog.user_message,
+                timestamp=dialog.user_message_time,
+            ))
         if dialog.ai_response:  
-            messages.append({
-                "id": f"{dialog.id}ai",
-                "role": "ai",
-                "content": dialog.ai_response,
-                "timestamp": dialog.ai_response_time
-            })
+            messages.append(MessageItem(
+                id=f"{dialog.id}ai",
+                role="ai",
+                content=dialog.ai_response,
+                timestamp=dialog.ai_response_time,
+            ))
     
-    return {
-        "success": True,
-        "user_id": user_id,
-        "username": current_user["username"],
-        "messages": messages
-    }
+    return ChatHistoryResponse(
+        user_id=user_id,
+        username=current_user["username"],
+        messages=messages,
+    )

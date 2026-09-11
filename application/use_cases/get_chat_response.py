@@ -8,27 +8,38 @@ from dataclasses import dataclass
 from domain.entities.dialog import Dialog
 
 from application.services.dialog_service import DialogService 
+from application.ports.ai import AIService
 
 @dataclass
 class UserMessage:
     user_id: int
-    user_message: str
+    message: str
+
+@dataclass
+class GetChatResponseWithContextResponse:
+    pass
 
 
-class GetChatResponse:
-    async def execute(self, user_message: UserMessage) -> str:
-        dialogs = await dialog_service.get_user_history(UserMessage.user_id, limit=10)
+class GetChatResponseWithContext:
+    async def execute(
+        self,
+        user_message: UserMessage,
+        dialog_service: DialogService,
+        ai_service: AIService
+        ) -> str:
+        
+        user_id, message = user_message.user_id, user_message.message
 
+        dialogs = await dialog_service.get_user_history(user_id=user_id, limit=10)
 
-async def get_response_with_history(self, user_id: int, user_message: str):
-    dialogs = await self.dialog_service.get_user_history(user_id, limit=10)
+        dialog_history = []
+        for dialog in dialogs:ы
+            dialog_history.extend(dialog.to_context_messages())
 
-    dialog_history = []
-    for dialog in dialogs:
-        dialog_history.extend(dialog.to_context_messages())
+        response = await ai_service.get_ai_response_with_context(
+            user_id=user_id,
+            user_message=message,
+            context=dialog_history
+        )
 
-    return await self.ai_service.get_ai_response_with_context(
-        user_id=user_id,
-        user_message=user_message,
-        context=dialog_history
-    )
+        return GetChat

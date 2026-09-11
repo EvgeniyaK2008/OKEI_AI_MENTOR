@@ -147,7 +147,7 @@ class AIContextService:
         return percentage, weaknesses
 
     async def get_student_result(self, question_history: List[Dialog]) -> dict:
-        dialog = question_history[0]
+        dialog = question_history[-5:]
         dialog: Dialog = await self.dialog_repository.find_by_id(dialog.id)
         user_id: int = dialog.user_id
 
