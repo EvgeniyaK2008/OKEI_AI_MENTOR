@@ -115,16 +115,19 @@ class ChatHistoryResponse(BaseModel):
     username: str
     messages: list[MessageItem]
 
-
-# ---------- App ----------
-
 load_dotenv()
 config = Config.load()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI()
+from fastapi.security import HTTPBearer
+
+bearer_docs = HTTPBearer(auto_error=False)
+
+app = FastAPI(
+    title="AI Mentor"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -185,7 +188,7 @@ async def get_ai_service(db: AsyncSession = Depends(get_db)):
     )
 
 
-@app.get('/progress', response_model=list[ProgressItem])
+@app.get('/progress', response_model=list[ProgressItem], dependencies=[Depends(bearer_docs)])
 async def get_progress(
     request: Request,
     student_progress_repo: StudentProgressRepository = Depends(get_student_progress_repo),
@@ -208,7 +211,7 @@ async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_grou
     groups = await group_repo.find_active_groups()
 
     return [
-        GroupItem(id=g.id, name=f"{datetime.now.year - g.year}")
+        GroupItem(id=g.id, name=f"{datetime.now().year - g.year + 1}{g.specialty.short_name}{g.group_number}")
         for g in groups
     ]
 
@@ -280,7 +283,7 @@ async def login_page(
     )
 
 
-@app.post('/chat', response_model=ChatResponse)
+@app.post('/chat', response_model=ChatResponse, dependencies=[Depends(bearer_docs)])
 async def chat(
         request: Request,
         data: ChatRequest,
@@ -310,7 +313,7 @@ async def chat(
     return ChatResponse(message=ai_response)
 
 
-@app.get("/chat/history", response_model=ChatHistoryResponse)
+@app.get("/chat/history", response_model=ChatHistoryResponse, dependencies=[Depends(bearer_docs)])
 async def get_chat_history(
     request: Request,
     dialog_service: DialogService = Depends(get_dialog_service)
@@ -322,14 +325,14 @@ async def get_chat_history(
     for dialog in dialogs:
         if dialog.user_message:  
             messages.append(MessageItem(
-                id=f"{dialog.id}user",
+                id=f"{dialog.id}",
                 role="user",
                 content=dialog.user_message,
                 timestamp=dialog.user_message_time,
             ))
         if dialog.ai_response:  
             messages.append(MessageItem(
-                id=f"{dialog.id}ai",
+                id=f"{dialog.id}",
                 role="ai",
                 content=dialog.ai_response,
                 timestamp=dialog.ai_response_time,
