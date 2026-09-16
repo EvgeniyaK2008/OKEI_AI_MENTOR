@@ -84,7 +84,7 @@ class AsyncPostgresUserRepository(UserRepository):
             middle_name=user.middle_name,
             last_name=user.last_name,
             role=user.role.value if hasattr(user.role, 'value') else user.role,
-            group_id=user.group.id if user.group.id else None 
+            group_id=user.group.id if user.group else None
         )
         self.session.add(db_user)
         await self.session.commit()

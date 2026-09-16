@@ -298,6 +298,40 @@ async def login_page(
     )
 
 
+@app.post(
+    "/register",
+    response_model=RegisterResponse,
+    status_code=201,
+    tags=["auth"],
+    summary="Регистрация студента",
+    description="Создаёт пользователя. Имена необязательны. Ошибка 409 — логин уже занят.",
+    responses={409: {"model": ErrorResponse, "description": "Username уже занят"}},
+)
+async def register(
+    data: RegisterRequest,
+    service: UserService = Depends(get_user_service),
+    user_repo: UserRepository = Depends(get_user_repo),
+    group_repo: GroupRepository = Depends(get_group_repo),
+):
+    existing = await user_repo.find_by_username(data.username)
+    if existing:
+        return JSONResponse(status_code=409, content=ErrorResponse(error="Username already exists").model_dump())
+
+    group = None
+    if data.group_id:
+        group = await group_repo.find_by_id(int(data.group_id))
+
+    user = await service.get_or_create_user(
+        username=data.username,
+        hashed_password=hash_password(data.password),
+        first_name=data.first_name,
+        middle_name=data.middle_name,
+        last_name=data.last_name,
+        group=group,
+    )
+    return RegisterResponse(user_id=user.id, username=user.username)
+
+
 @app.get(
     "/skills",
     response_model=list[SkillItem],
