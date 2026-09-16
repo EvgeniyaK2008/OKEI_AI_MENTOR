@@ -19,7 +19,7 @@ from application.repositories.student_progress_repository import StudentProgress
 from application.repositories.user_repository import UserRepository
 from application.services.dialog_service import DialogService
 from application.use_cases.get_skill_for_student import GetSkillForStudent
-from application.utils.academic import current_course
+from application.repositories.group_repository import GroupRepository
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ class StartSkillSession:
         get_skill_for_student: GetSkillForStudent,
         student_progress_repo: StudentProgressRepository,
         specialty_repo: SpecialtyRepository,
+        group_repo: GroupRepository
     ):
         self.ai_service = ai_service
         self.dialog_service = dialog_service
@@ -46,6 +47,7 @@ class StartSkillSession:
         self.get_skill_for_student = get_skill_for_student
         self.student_progress_repo = student_progress_repo
         self.specialty_repo = specialty_repo
+        self.group_repo = group_repo
 
     async def execute(self, user_id: int) -> StartSkillSessionResponse:
         prompt = await self._form_question_instruction(user_id)
@@ -65,7 +67,7 @@ class StartSkillSession:
 
     async def _form_question_instruction(self, user_id: int) -> str:
         user: User = await self.user_repo.find_by_id(user_id)
-        course = current_course(user.group.year)
+        course: int = user.group.get_course()
 
         matrix: SkillMatrix = await self.get_skill_for_student.execute(user_id)
         progress: StudentProgress | None = (

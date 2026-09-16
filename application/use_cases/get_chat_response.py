@@ -33,7 +33,7 @@ class GetChatResponseWithContext:
         dialogs = await dialog_service.get_user_history(user_id=user_id, limit=10)
 
         dialog_history = []
-        for dialog in dialogs:ы
+        for dialog in dialogs:
             dialog_history.extend(dialog.to_context_messages())
 
         response = await ai_service.get_ai_response_with_context(
@@ -42,4 +42,4 @@ class GetChatResponseWithContext:
             context=dialog_history
         )
 
-        return GetChat
+        return GetChatResponseWithContextResponse

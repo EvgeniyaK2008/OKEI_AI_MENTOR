@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Optional, Any
 
@@ -30,5 +31,7 @@ class Groups:
     def get_specialty_id(self) -> int:
         return self.specialty.id
     
-    def get_course(self):
-        return self.course
+    def get_course(self) -> int:
+        now = datetime.now()
+        academic_year_start = now.year if now.month >= 9 else now.year - 1
+        return academic_year_start - self.year + 1
