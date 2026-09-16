@@ -24,7 +24,7 @@ class User:
     def get_group(self):
         return self.group
 
-    def get_course(self): #define using start year
+    def get_course(self): 
         return self.group.get_course()
 
     def get_specialty_id(self):

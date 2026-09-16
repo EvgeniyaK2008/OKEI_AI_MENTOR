@@ -301,12 +301,22 @@ async def login_page(
 @app.get(
     "/skills",
     response_model=list[SkillItem],
+    dependencies=[Depends(bearer_docs)],
     tags=["study"],
     summary="Каталог навыков",
     description="Все навыки матриц компетенций. Персональный прогресс по ним — GET /progress.",
 )
-async def get_skills(matrix_repo: SkillMatrixRepository = Depends(get_matrix_repo)):
-    matrices = await matrix_repo.find_skills_with_progress() # MAKE FIND ALL SKILLS FOR COURSE
+async def get_skills(
+    request: Request,
+    user_repo: UserRepository = Depends(get_user_repo),
+    matrix_repo: SkillMatrixRepository = Depends(get_matrix_repo),
+    student_progress_repo: StudentProgressRepository = Depends(get_student_progress_repo)
+    ):
+    user_id = get_current_user(request)["user_id"]
+    user: User = await user_repo.find_by_id(user_id)
+    course: int = user.get_course()
+    specialty_id: int = user.get_specialty_id()
+    matrices = await matrix_repo.find_by_course_and_specialty(course, specialty_id) 
     return [SkillItem(id=m.id, name=m.skill, description=m.criterions) for m in matrices]
 
 
