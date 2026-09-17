@@ -27,5 +27,4 @@ class SkillMatrixRepository(ABC):
         student_id: int
     ) -> list[tuple[SkillMatrix, int]]:
         pass
-
     

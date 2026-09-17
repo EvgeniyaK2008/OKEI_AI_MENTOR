@@ -17,7 +17,7 @@ class UserMessage:
 
 @dataclass
 class GetChatResponseWithContextResponse:
-    pass
+    response: str
 
 
 class GetChatResponseWithContext:
@@ -42,4 +42,4 @@ class GetChatResponseWithContext:
             context=dialog_history
         )
 
-        return GetChatResponseWithContextResponse
+        return GetChatResponseWithContextResponse(response=response)
