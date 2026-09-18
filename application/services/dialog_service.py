@@ -45,3 +45,12 @@ class DialogService:
         )
         
         return dialogs
+    
+    async def get_question_history(
+            self,
+            question_id: int 
+    ) -> list[Dialog]:
+        question_history: list[Dialog] = await self.repository.get_dialogs_by_question(
+            question_id=question_id
+        )
+        return question_history

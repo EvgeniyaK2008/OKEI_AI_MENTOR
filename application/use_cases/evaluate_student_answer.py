@@ -13,10 +13,6 @@ from domain.entities.student_progress import StudentProgress
 import logging
 logger = logging.getLogger(__name__)
 
-@dataclass
-class A:
-    pass
-
 class EvaluateStudentAnswer:
     def __init__(
             self,
@@ -32,12 +28,9 @@ class EvaluateStudentAnswer:
         self.dialog_repo = dialog_repo
         self.ai_service = ai_service
         
-    async def execute(self, 
-                    question_id: int, 
-                    user_id: int):
-        
-        question_history: list[Dialog] = await self.dialog_service.get_user_history(user_id=user_id, limit=20, question_id=question_id)
-
+    async def execute(self, question_id: int):
+        question_history: list[Dialog] = await self.dialog_repo.get_dialogs_by_question(question_id=question_id)
+        user_id: int = question_history[0].user_id
         result = await self._get_student_result(question_history=question_history)
 
         student_progress = StudentProgress(
@@ -61,9 +54,7 @@ class EvaluateStudentAnswer:
         return percentage, weaknesses
 
     async def _get_student_result(self, question_history: list[Dialog]) -> dict:
-        dialog = question_history[-5:]
-        dialog: Dialog = await self.dialog_repo.find_by_id(dialog.id)
-        user_id: int = dialog.user_id
+        user_id: int = question_history[0].user_id
 
         matrix: SkillMatrix = await self.get_skill_for_student.execute(student_id=user_id)
 

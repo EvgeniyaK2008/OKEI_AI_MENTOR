@@ -462,8 +462,8 @@ async def get_chat_history(
     messages = []
     for dialog in dialogs:
         if dialog.user_message:
-            messages.append(MessageItem(id=f"{dialog.id}user", role="user", content=dialog.user_message, timestamp=dialog.user_message_time))
+            messages.append(MessageItem(id=f"{dialog.id}", role="user", content=dialog.user_message, timestamp=dialog.user_message_time))
         if dialog.ai_response:
-            messages.append(MessageItem(id=f"{dialog.id}ai", role="ai", content=dialog.ai_response, timestamp=dialog.ai_response_time))
+            messages.append(MessageItem(id=f"{dialog.id}", role="ai", content=dialog.ai_response, timestamp=dialog.ai_response_time))
 
     return ChatHistoryResponse(user_id=user_id, username=current_user["username"], messages=messages)

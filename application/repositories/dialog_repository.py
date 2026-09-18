@@ -20,9 +20,8 @@ class DialogRepository(ABC):
     @abstractmethod
     async def get_dialogs_by_question(
         self,
-        user_id: int,
         question_id: int
-    ) -> List[Dialog]:
+    ) -> list[Dialog]:
         pass
     
     @abstractmethod

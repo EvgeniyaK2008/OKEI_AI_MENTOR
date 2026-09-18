@@ -1,12 +1,10 @@
-from typing import List
-
 from domain.entities.skill_matrix import SkillMatrix
 from application.repositories.student_progress_repository import StudentProgressRepository
 from application.repositories.skill_matrix_repository import SkillMatrixRepository
 from application.repositories.user_repository import UserRepository
 from domain.entities.student_progress import StudentProgress
 from domain.entities.user import User
-
+from dataclasses import dataclass
 
 
 class GetSkillForStudent:
@@ -36,3 +34,4 @@ class GetSkillForStudent:
 
         next_progress, _ = min(not_mastered, key=lambda p: p[0].learn_order)
         return await self.skill_matrix_repo.find_by_id(next_progress.id)
+    

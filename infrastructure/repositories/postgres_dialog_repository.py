@@ -94,5 +94,30 @@ class AsyncPostgresDialogRepository(DialogRepository):
             logger.error(f"DB error: Couldn't find dialog by id {dialog_id}: {e}")
             raise DataBaseError(str(e), operation='find_dialog_by_id')
 
-    async def get_dialogs_by_question():
-        pass 
+    async def get_dialogs_by_question_id(self, question_id: str) -> list[Dialog]:
+        try:
+            result = await self.session.execute(
+                select(DialogModel)
+                .where(DialogModel.question_id == question_id)
+                .order_by(DialogModel.ai_response_time.asc())  
+            )
+            rows = result.scalars().all()
+
+            if not rows:
+                return []
+
+            return [
+                Dialog(
+                    id=row.id,
+                    user_id=row.user_id,
+                    user_message=row.user_message,
+                    ai_response=row.ai_response,
+                    question_id=row.question_id,
+                    user_message_time=row.user_message_time,
+                    ai_response_time=row.ai_response_time,
+                )
+                for row in rows
+            ]
+        except Exception as e:
+            logger.error(f"DB error: Couldn't find dialogs for question {question_id}: {e}")
+            raise DataBaseError(str(e), operation="get_dialogs_by_question_id")
