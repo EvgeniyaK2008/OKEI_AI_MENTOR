@@ -94,7 +94,7 @@ class AsyncPostgresDialogRepository(DialogRepository):
             logger.error(f"DB error: Couldn't find dialog by id {dialog_id}: {e}")
             raise DataBaseError(str(e), operation='find_dialog_by_id')
 
-    async def get_dialogs_by_question_id(self, question_id: str) -> list[Dialog]:
+    async def get_dialogs_by_question(self, question_id: str) -> list[Dialog]:
         try:
             result = await self.session.execute(
                 select(DialogModel)

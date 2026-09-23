@@ -3,23 +3,22 @@ from typing import Dict, List
 import openai
 
 from application.ports.ai.ai_port import AIService
-from config.config import Config
+from config.config import AIModelConfig
 
 
-class YandexAIService(AIService):
-    def __init__(self, config: Config):
+class YandexAIMainModelService(AIService):
+    def __init__(self, config: AIModelConfig):
         self.client = openai.OpenAI(
-            api_key=config.ai_api_key,
-            base_url=config.ai_base_url,
-            project=config.ai_cloud_folder
+            api_key=config.api_key,
+            base_url=config.base_url,
+            project=config.cloud_folder
         )
-        self.ai_model = config.ai_model
-        self.ai_temperature = config.ai_temperature
-        self.ai_max_tokens = config.ai_max_tokens
-        self.instructions = config.ai_instruction
+        self.ai_model = config.model
+        self.ai_temperature = config.temperature
+        self.ai_max_tokens = config.max_tokens
+        self.instructions = config.instruction
 
     async def get_ai_response_with_context(self, 
-        user_id: int,
         user_message: str,
         context: List[Dict[str, str]]
         ) -> str:

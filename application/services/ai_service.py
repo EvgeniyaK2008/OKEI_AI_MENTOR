@@ -35,13 +35,11 @@ class AIContextService:
             student_progress_repository: StudentProgressRepository,
             user_repository: UserRepository,
             speciality_repository: SpecialtyRepository,
-            instruction: str,
             get_skill_for_student: GetSkillForStudent
             ):
         self.dialog_service = dialog_service
         self.dialog_repository = dialog_repository
         self.ai_service = ai_service
-        self.instruction = instruction
         self.student_progress_repository = student_progress_repository
         self.matrix_repository = matrix_repository
         self.user_repository = user_repository
@@ -56,7 +54,6 @@ class AIContextService:
             dialog_history.extend(dialog.to_context_messages())
 
         return await self.ai_service.get_ai_response_with_context(
-            user_id=user_id,
             user_message=user_message,
             context=dialog_history
         )

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 from application.use_cases.start_skill_session import StartSkillSession
 
-from infrastructure.ai.yandex_ai_service import YandexAIService
+from infrastructure.ai.yandex_ai_service import YandexAIMainModelService
 from infrastructure.ai.qwen_ai_service import QwenAIService
 from application.services.ai_service import AIContextService
 from application.services.user_service import UserService
@@ -171,7 +171,7 @@ async def get_start_skill_session(db: AsyncSession = Depends(get_db)):
     dialog_repo = AsyncPostgresDialogRepository(db)
     group_repo = AsyncPostgresGroupRepository(db)
     return StartSkillSession(
-        ai_service=YandexAIService(config),
+        ai_service=YandexAIMainModelService(config.mentor_ai),
         dialog_service=DialogService(dialog_repo),
         user_repo=user_repo,
         get_skill_for_student=GetSkillForStudent(
@@ -219,12 +219,11 @@ async def get_ai_service(db: AsyncSession = Depends(get_db)):
     return AIContextService(
         dialog_service=DialogService(dialog_repo),
         dialog_repository=dialog_repo,
-        ai_service=YandexAIService(config),
+        ai_service=YandexAIMainModelService(config.mentor_ai),
         matrix_repository=skill_matrix_repo,
         student_progress_repository=student_progress_repo,
         user_repository=user_repo,
         speciality_repository=specialty_repo,
-        instruction=config.ai_instruction,
         get_skill_for_student=get_skill_for_student
     )
 
