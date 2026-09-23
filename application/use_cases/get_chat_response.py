@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from domain.entities.dialog import Dialog
 
 from application.services.dialog_service import DialogService 
-from application.ports.ai import AIService
+from application.ports.ai.ai_port import AIService
 
 @dataclass
 class UserMessage:
@@ -37,7 +37,6 @@ class GetChatResponseWithContext:
             dialog_history.extend(dialog.to_context_messages())
 
         response = await ai_service.get_ai_response_with_context(
-            user_id=user_id,
             user_message=message,
             context=dialog_history
         )

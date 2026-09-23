@@ -1,49 +1,17 @@
-#main.py
+# main.py
 import logging
-import sys
-import asyncio
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message
-from aiogram.filters import Command
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.client.session.aiohttp import AiohttpSession
-from aiohttp import BasicAuth
 from dotenv import load_dotenv
+from datetime import datetime
+from typing import Literal
 
-from application.repositories.session_repository import SessionRepository
-from application.repositories.skill_matrix_repository import SkillMatrixRepository
-from application.repositories.group_repository import GroupRepository
-from application.repositories.student_progress_repository import StudentProgressRepository
-from application.repositories.user_repository import UserRepository
-from application.repositories.specialty_repository import SpecialtyRepository
-from config.config import Config
-from datetime import datetime, timezone
-
-from application.use_cases.start_skill_session import StartSkillSession
-
-from infrastructure.ai.yandex_ai_service import YandexAIMainModelService
-from infrastructure.ai.qwen_ai_service import QwenAIService
-from application.services.ai_service import AIContextService
-from application.services.user_service import UserService
-from application.services.dialog_service import DialogService
-
-from domain.entities.session import Session
-from domain.entities.skill_matrix import SkillMatrix
-from domain.entities.student_progress import StudentProgress
-from domain.entities.user import User, UserRole
-from domain.entities.study import Specialty, Department, Groups
-from domain.entities.dialog import Dialog
-
-from fastapi import FastAPI, Request, Form, Depends, Response, Query
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from fastapi import FastAPI, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from typing import Optional, Any, List, Literal
+from config.config import Config
 
 from infrastructure.database.connection import get_db
 from infrastructure.repositories.postgres_user_repository import AsyncPostgresUserRepository
@@ -52,16 +20,39 @@ from infrastructure.repositories.postgres_student_progress_repository import Asy
 from infrastructure.repositories.postgres_group_repository import AsyncPostgresGroupRepository
 from infrastructure.repositories.postgres_dialog_repository import AsyncPostgresDialogRepository
 from infrastructure.repositories.postgres_specialty_repository import AsyncPostgresSpecialtyRepository
+
+from infrastructure.ai.yandex_ai_service import YandexAIMainModelService
 from application.services.user_service import UserService
+from application.services.dialog_service import DialogService
 from application.services.auth import hash_password, verify_password, create_access_token, get_current_user
+
+from application.use_cases.start_skill_session import StartSkillSession, StartSkillSessionResponse
 from application.use_cases.get_skill_for_student import GetSkillForStudent
-from presentation.web.fastapi.models import *
+from application.use_cases.get_chat_response import GetChatResponseWithContext, UserMessage, GetChatResponseWithContextResponse
+from application.use_cases.evaluate_student_answer import EvaluateStudentAnswer
+from application.use_cases.detect_student_answer import DetectStudentsAnswer, DetectStudentsAnswerResponse
 
-from pydantic import BaseModel, Field
+from domain.entities.skill_matrix import SkillMatrix
+from domain.entities.student_progress import StudentProgress
+from domain.entities.user import User
+from application.repositories.user_repository import UserRepository
+from application.repositories.group_repository import GroupRepository
+from application.repositories.specialty_repository import SpecialtyRepository
+from application.repositories.skill_matrix_repository import SkillMatrixRepository
+from application.repositories.student_progress_repository import StudentProgressRepository
+from application.repositories.dialog_repository import DialogRepository
+from application.ports.ai.ai_port import AIService
 
+
+# ============================ Pydantic-модели ============================
 
 class ErrorResponse(BaseModel):
-    error: str = Field(description="Человекочитаемое описание ошибки", examples=["Username already exists"])
+    error: str = Field(description="Описание ошибки", examples=["Username already exists"])
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(examples=["ivanov"])
+    password: str = Field(examples=["supersecret1"])
 
 
 class RegisterRequest(BaseModel):
@@ -135,19 +126,17 @@ class ChatHistoryResponse(BaseModel):
     messages: list[MessageItem] = Field(description="Хронологический список сообщений единственного диалога студента с ментором. У нового пользователя - пустой массив")
 
 
+# ============================ Приложение ============================
+
 load_dotenv()
 config = Config.load()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-from fastapi.security import HTTPBearer
-
 bearer_docs = HTTPBearer(auto_error=False)
 
-app = FastAPI(
-    title="AI Mentor"
-)
+app = FastAPI(title="AI Mentor")
 
 app.add_middleware(
     CORSMiddleware,
@@ -157,19 +146,58 @@ app.add_middleware(
     allow_headers=["*"],  
 )
 
-async def get_user_service(db: AsyncSession = Depends(get_db)):
-    user_repo = AsyncPostgresUserRepository(db)
-    skill_repo = AsyncPostgresSkillMatrixRepository(db)
-    progress_repo = AsyncPostgresStudentProgressRepository(db)
-    return UserService(user_repo, skill_repo, progress_repo)
 
-async def get_start_skill_session(db: AsyncSession = Depends(get_db)):
+# ============================ Фабрики зависимостей ============================
+
+async def get_user_repo(db: AsyncSession = Depends(get_db)) -> UserRepository:
+    return AsyncPostgresUserRepository(db)
+
+async def get_group_repo(db: AsyncSession = Depends(get_db)) -> GroupRepository:
+    return AsyncPostgresGroupRepository(db)
+
+async def get_specialty_repo(db: AsyncSession = Depends(get_db)) -> SpecialtyRepository:
+    return AsyncPostgresSpecialtyRepository(db)
+
+async def get_student_progress_repo(db: AsyncSession = Depends(get_db)) -> StudentProgressRepository:
+    return AsyncPostgresStudentProgressRepository(db)
+
+async def get_matrix_repo(db: AsyncSession = Depends(get_db)) -> SkillMatrixRepository:
+    return AsyncPostgresSkillMatrixRepository(db)
+
+async def get_dialog_repo(db: AsyncSession = Depends(get_db)) -> DialogRepository:
+    return AsyncPostgresDialogRepository(db)
+
+async def get_dialog_service(db: AsyncSession = Depends(get_db)) -> DialogService:
+    return DialogService(AsyncPostgresDialogRepository(db))
+
+async def get_user_service(db: AsyncSession = Depends(get_db)) -> UserService:
+    return UserService(
+        AsyncPostgresUserRepository(db),
+        AsyncPostgresSkillMatrixRepository(db),
+        AsyncPostgresStudentProgressRepository(db)
+    )
+
+async def get_ai_mentor(db: AsyncSession = Depends(get_db)) -> AIService:
+    return YandexAIMainModelService(config.mentor_ai)
+
+async def get_ai_secondary(db: AsyncSession = Depends(get_db)) -> AIService:
+    return YandexAIMainModelService(config.secondary_ai)
+
+async def get_get_skill_for_student(db: AsyncSession = Depends(get_db)) -> GetSkillForStudent:
+    return GetSkillForStudent(
+        student_progress_repo=AsyncPostgresStudentProgressRepository(db),
+        skill_matrix_repo=AsyncPostgresSkillMatrixRepository(db),
+        user_repo=AsyncPostgresUserRepository(db)
+    )
+
+async def get_start_skill_session(db: AsyncSession = Depends(get_db)) -> StartSkillSession:
     user_repo = AsyncPostgresUserRepository(db)
     skill_matrix_repo = AsyncPostgresSkillMatrixRepository(db)
     student_progress_repo = AsyncPostgresStudentProgressRepository(db)
     specialty_repo = AsyncPostgresSpecialtyRepository(db)
     dialog_repo = AsyncPostgresDialogRepository(db)
     group_repo = AsyncPostgresGroupRepository(db)
+    
     return StartSkillSession(
         ai_service=YandexAIMainModelService(config.mentor_ai),
         dialog_service=DialogService(dialog_repo),
@@ -184,59 +212,36 @@ async def get_start_skill_session(db: AsyncSession = Depends(get_db)):
         group_repo=group_repo
     )
 
-async def get_group_repo(db: AsyncSession = Depends(get_db)):
-    return AsyncPostgresGroupRepository(db)
-
-async def get_dialog_service(db: AsyncSession = Depends(get_db)):
-    return DialogService(AsyncPostgresDialogRepository(db))
-
-async def get_user_repo(db: AsyncSession = Depends(get_db)):
-    return AsyncPostgresUserRepository(db)
-
-async def get_specialty_repo(db: AsyncSession = Depends(get_db)):
-    return AsyncPostgresSpecialtyRepository(db)
-
-async def get_student_progress_repo(db: AsyncSession = Depends(get_db)):
-    return AsyncPostgresStudentProgressRepository(db)
-
-async def get_matrix_repo(db: AsyncSession = Depends(get_db)):
-    return AsyncPostgresSkillMatrixRepository(db)
-
-
-async def get_ai_service(db: AsyncSession = Depends(get_db)):
-    user_repo = AsyncPostgresUserRepository(db)
-    skill_matrix_repo = AsyncPostgresSkillMatrixRepository(db)
-    student_progress_repo = AsyncPostgresStudentProgressRepository(db)
-    specialty_repo = AsyncPostgresSpecialtyRepository(db)
+async def get_evaluate_student_answer(db: AsyncSession = Depends(get_db)) -> EvaluateStudentAnswer:
     dialog_repo = AsyncPostgresDialogRepository(db)
+    student_progress_repo = AsyncPostgresStudentProgressRepository(db)
+    skill_matrix_repo = AsyncPostgresSkillMatrixRepository(db)
+    user_repo = AsyncPostgresUserRepository(db)
     
-    get_skill_for_student = GetSkillForStudent(
-        student_progress_repo=student_progress_repo,
-        skill_matrix_repo=skill_matrix_repo,
-        user_repo=user_repo
-    )
-    
-    return AIContextService(
+    return EvaluateStudentAnswer(
         dialog_service=DialogService(dialog_repo),
-        dialog_repository=dialog_repo,
-        ai_service=YandexAIMainModelService(config.mentor_ai),
-        matrix_repository=skill_matrix_repo,
-        student_progress_repository=student_progress_repo,
-        user_repository=user_repo,
-        speciality_repository=specialty_repo,
-        get_skill_for_student=get_skill_for_student
+        student_progress_repo=student_progress_repo,
+        get_skill_for_student=GetSkillForStudent(
+            student_progress_repo=student_progress_repo,
+            skill_matrix_repo=skill_matrix_repo,
+            user_repo=user_repo
+        ),
+        dialog_repo=dialog_repo,
+        ai_service=YandexAIMainModelService(config.secondary_ai)
+    )
+
+async def get_detect_students_answer(db: AsyncSession = Depends(get_db)) -> DetectStudentsAnswer:
+    return DetectStudentsAnswer(
+        ai_service=YandexAIMainModelService(config.secondary_ai),
+        dialog_repo=AsyncPostgresDialogRepository(db)
     )
 
 
-@app.get(
-    '/me',
-    response_model=UserPublic,
-    tags=["auth"],
-    dependencies=[Depends(bearer_docs)],
-    summary="Текущий пользователь",
-    description="Профиль по токену: кто и в какой группе.",
-    responses={401: {"model": ErrorResponse, "description": "Нет токена или токен недействителен"}},
-    )
+# ============================ Роуты ============================
+
+@app.get('/me', response_model=UserPublic, tags=["auth"], dependencies=[Depends(bearer_docs)],
+         summary="Текущий пользователь", description="Профиль по токену: кто и в какой группе.",
+         responses={401: {"model": ErrorResponse, "description": "Нет токена или токен недействителен"}})
 async def get_me(
     request: Request,
     user_repo: UserRepository = Depends(get_user_repo),
@@ -251,22 +256,14 @@ async def get_me(
         specialty = await specialty_repo.find_by_id(group.specialty.id)
         group_name = str(group.year) + str(specialty.short_name) + str(group.group_number)
     return UserPublic(
-        id=user.id,
-        username=user.username,
-        first_name=user.first_name or "",
-        middle_name=user.middle_name or "",
-        last_name=user.last_name or "",
-        group=group_name,
+        id=user.id, username=user.username, first_name=user.first_name or "",
+        middle_name=user.middle_name or "", last_name=user.last_name or "", group=group_name,
     )
 
-@app.post(
-    "/login",
-    response_model=LoginResponse,
-    tags=["auth"],
-    summary="Вход и получение токена",
-    description="Проверяет логин/пароль и выдаёт JWT вместе с профилем. Ошибка 401 — неверные учётные данные.",
-    responses={401: {"model": ErrorResponse, "description": "Неверный логин или пароль"}},
-)
+
+@app.post("/login", response_model=LoginResponse, tags=["auth"],
+          summary="Вход и получение токена", description="Проверяет логин/пароль и выдаёт JWT вместе с профилем.",
+          responses={401: {"model": ErrorResponse, "description": "Неверный лIcon или пароль"}})
 async def login_page(
     data: LoginRequest,
     user_repo: UserRepository = Depends(get_user_repo),
@@ -286,26 +283,14 @@ async def login_page(
 
     return LoginResponse(
         token=token,
-        user=UserPublic(
-            id=user.id,
-            username=user.username,
-            first_name=user.first_name or "",
-            middle_name=user.middle_name or "",
-            last_name=user.last_name or "",
-            group=group_name,
-        ),
+        user=UserPublic(id=user.id, username=user.username, first_name=user.first_name or "",
+                        middle_name=user.middle_name or "", last_name=user.last_name or "", group=group_name),
     )
 
 
-@app.post(
-    "/register",
-    response_model=RegisterResponse,
-    status_code=201,
-    tags=["auth"],
-    summary="Регистрация студента",
-    description="Создаёт пользователя. Имена необязательны. Ошибка 409 — логин уже занят.",
-    responses={409: {"model": ErrorResponse, "description": "Username уже занят"}},
-)
+@app.post("/register", response_model=RegisterResponse, status_code=201, tags=["auth"],
+          summary="Регистрация студента", description="Создаёт пользователя. Ошибка 409 — логин уже занят.",
+          responses={409: {"model": ErrorResponse, "description": "Username уже занят"}})
 async def register(
     data: RegisterRequest,
     service: UserService = Depends(get_user_service),
@@ -321,30 +306,19 @@ async def register(
         group = await group_repo.find_by_id(int(data.group_id))
 
     user = await service.get_or_create_user(
-        username=data.username,
-        hashed_password=hash_password(data.password),
-        first_name=data.first_name,
-        middle_name=data.middle_name,
-        last_name=data.last_name,
-        group=group,
+        username=data.username, hashed_password=hash_password(data.password),
+        first_name=data.first_name, middle_name=data.middle_name, last_name=data.last_name, group=group,
     )
     return RegisterResponse(user_id=user.id, username=user.username)
 
 
-@app.get(
-    "/skills",
-    response_model=list[SkillItem],
-    dependencies=[Depends(bearer_docs)],
-    tags=["study"],
-    summary="Каталог навыков",
-    description="Все навыки матриц компетенций. Персональный прогресс по ним — GET /progress.",
-)
+@app.get("/skills", response_model=list[SkillItem], dependencies=[Depends(bearer_docs)], tags=["study"],
+         summary="Каталог навыков", description="Все навыки матриц компетенций.")
 async def get_skills(
     request: Request,
     user_repo: UserRepository = Depends(get_user_repo),
     matrix_repo: SkillMatrixRepository = Depends(get_matrix_repo),
-    student_progress_repo: StudentProgressRepository = Depends(get_student_progress_repo)
-    ):
+):
     user_id = get_current_user(request)["user_id"]
     user: User = await user_repo.find_by_id(user_id)
     course: int = user.get_course()
@@ -353,15 +327,9 @@ async def get_skills(
     return [SkillItem(id=m.id, name=m.skill, description=m.criterions) for m in matrices]
 
 
-@app.get(
-    "/progress",
-    response_model=list[ProgressItem],
-    tags=["study"],
-    dependencies=[Depends(bearer_docs)],
-    summary="Прогресс студента",
-    description="Проценты освоения навыков (0–100) текущего пользователя. У нового пользователя — пустой массив. Ошибка 401 — нет токена.",
-    responses={401: {"model": ErrorResponse}},
-)
+@app.get("/progress", response_model=list[ProgressItem], tags=["study"], dependencies=[Depends(bearer_docs)],
+         summary="Прогресс студента", description="Проценты освоения навыков (0–100).",
+         responses={401: {"model": ErrorResponse}})
 async def get_progress(
     request: Request,
     student_progress_repo: StudentProgressRepository = Depends(get_student_progress_repo),
@@ -377,79 +345,62 @@ async def get_progress(
     return result
 
 
-@app.get(
-    "/groups",
-    response_model=list[GroupItem],
-    tags=["study"],
-    summary="Список учебных групп",
-    description="Активные группы колледжа для выбора при регистрации. Группа определяет специальность (набор навыков) и курс (сложность заданий). Смена группы студентом не предусмотрена.",
-)
+@app.get("/groups", response_model=list[GroupItem], tags=["study"],
+         summary="Список учебных групп", description="Активные группы колледжа для выбора при регистрации.")
 async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_group_repo)):
     groups = await group_repo.find_active_groups()
-
     return [
         GroupItem(id=g.id, name=f"{datetime.now().year - g.year + 1}{g.specialty.short_name}{g.group_number}")
         for g in groups
     ]
 
-@app.post(
-    "/task",
-    response_model=TaskResponse,
-    tags=["chat"],
-    dependencies=[Depends(bearer_docs)],
-    summary="Начать практическую сессию",
-    description="Ментор находит навык с наибольшим дефицитом и генерирует практическое задание под специальность и курс студента. Задание также сохраняется в историю с question_id. Ответ студента принимается через POST /chat. Ошибка 401 — нет токена.",
-    responses={401: {"model": ErrorResponse}},
-)
+
+@app.post("/task", response_model=TaskResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
+          summary="Начать практическую сессию", description="Ментор генерирует задание под специальный курс.",
+          responses={401: {"model": ErrorResponse}})
 async def start_task(
     request: Request,
     use_case: StartSkillSession = Depends(get_start_skill_session),
 ):
     user_id = get_current_user(request)["user_id"]
     result = await use_case.execute(user_id)
-    
     return TaskResponse(question=result.question, question_id=result.question_id)
 
 
-@app.post(
-    "/chat",
-    response_model=ChatResponse,
-    tags=["chat"],
-    dependencies=[Depends(bearer_docs)],
-    summary="Сообщение ментору",
-    description="Единственный диалог студента с ментором. Ментор отвечает наводящими вопросами и подсказками, а не готовым решением. Для получения задания используй POST /task, а не команды в тексте. Ошибка 401 — нет токена.",
-    responses={401: {"model": ErrorResponse}},
-)
+@app.post("/chat", response_model=ChatResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
+          summary="Сообщение ментору", description="Единственный диалог студента с ментором.",
+          responses={401: {"model": ErrorResponse}})
 async def chat(
     request: Request,
     data: ChatRequest,
-    ai_service: AIContextService = Depends(get_ai_service),
     dialog_service: DialogService = Depends(get_dialog_service),
+    ai_service: AIService = Depends(get_ai_mentor),
 ):
     user_id = get_current_user(request)["user_id"]
-    now = datetime.now()
+    user_message = UserMessage(user_id=user_id, message=data.message)
+    
+    # Инициализируем use case без аргументов (как в твоём коде) и передаём зависимости в execute
+    use_case = GetChatResponseWithContext()
+    result: GetChatResponseWithContextResponse = await use_case.execute(
+        user_message=user_message,
+        dialog_service=dialog_service,
+        ai_service=ai_service
+    )
 
-    ai_response = await ai_service.get_response_with_history(user_id=user_id, user_message=data.message)
     await dialog_service.save(
         user_id=user_id,
         user_message=data.message,
-        ai_response=ai_response,
+        ai_response=result.response,
         question_id=None,
-        user_message_time=now,
+        user_message_time=datetime.now(),
         ai_response_time=datetime.now(),
     )
-    return ChatResponse(message=ai_response, question_id=None)
+    return ChatResponse(message=result.response, question_id=None)
 
 
-@app.get(
-    "/chat/history",
-    response_model=ChatHistoryResponse,
-    tags=["chat"],
-    dependencies=[Depends(bearer_docs)],
-    summary="История диалога",
-    description="Хронологическая история единственного диалога студента с ментором, включая выданные задания. У нового пользователя messages — пустой массив. Пагинация: limit (курсорная — в roadmap). Ошибка 401 — нет токена.",
-    responses={401: {"model": ErrorResponse}},
-)
+@app.get("/chat/history", response_model=ChatHistoryResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
+         summary="История диалога", description="Хронологическая история диалога.",
+         responses={401: {"model": ErrorResponse}})
 async def get_chat_history(
     request: Request,
     limit: int = Query(50, ge=1, le=200, description="Сколько сообщений вернуть, не более 200"),
@@ -467,3 +418,16 @@ async def get_chat_history(
             messages.append(MessageItem(id=f"{dialog.id}", role="ai", content=dialog.ai_response, timestamp=dialog.ai_response_time))
 
     return ChatHistoryResponse(user_id=user_id, username=current_user["username"], messages=messages)
+
+
+@app.post("/task/{question_id}/evaluate", tags=["chat"], dependencies=[Depends(bearer_docs)],
+          summary="Оценить ответ студента", description="Запускает оценку прогресса по завершённой сессии.",
+          responses={401: {"model": ErrorResponse}})
+async def evaluate_task(
+    request: Request,
+    question_id: str,
+    use_case: EvaluateStudentAnswer = Depends(get_evaluate_student_answer),
+):
+    # Твой use case ожидает int, поэтому приводим тип (или измени signature use case на str, если нужно)
+    await use_case.execute(question_id=int(question_id))
+    return {"message": "Оценка сохранена"}
