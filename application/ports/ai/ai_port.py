@@ -6,9 +6,9 @@ class AIService(ABC):
     @abstractmethod
     async def get_ai_response_with_context(
         self, 
-        user_id: int,
         user_message: str,
-        context: List[Dict[str, str]]
+        context: List[Dict[str, str]],
+        **kwargs 
     ) -> str:
         pass
 

@@ -408,6 +408,7 @@ async def start_task(
 ):
     user_id = get_current_user(request)["user_id"]
     result = await use_case.execute(user_id)
+    
     return TaskResponse(question=result.question, question_id=result.question_id)
 
 

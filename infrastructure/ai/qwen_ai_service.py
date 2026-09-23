@@ -11,7 +11,6 @@ config = Config.load()
 
 class QwenAIService(AIService):
     async def get_ai_response_with_context(self, 
-        user_id: int,
         user_message: str,
         context: List[Dict[str, str]]
         ) -> str:
