@@ -121,3 +121,32 @@ class AsyncPostgresDialogRepository(DialogRepository):
         except Exception as e:
             logger.error(f"DB error: Couldn't find dialogs for question {question_id}: {e}")
             raise DataBaseError(str(e), operation="get_dialogs_by_question_id")
+
+    async def get_last_task_dialog(self, user_id: int) -> Optional[Dialog]:
+        try:
+            result = await self.session.execute(
+                select(DialogModel)
+                .where(
+                    DialogModel.user_id == user_id,
+                    DialogModel.question_id.isnot(None)
+                )
+                .order_by(desc(DialogModel.user_message_time))
+                .limit(1)
+            )
+            row = result.scalar_one_or_none()
+            
+            if not row:
+                return None
+            
+            return Dialog(
+                id=row.id,
+                user_id=row.user_id,
+                user_message=row.user_message,
+                ai_response=row.ai_response,
+                question_id=row.question_id,
+                user_message_time=row.user_message_time,
+                ai_response_time=row.ai_response_time,
+            )
+        except Exception as e:
+            logger.error(f"DB error: Couldn't find last task dialog for user {user_id}: {e}")
+            raise DataBaseError(str(e), user_id=user_id, operation='get_last_task_dialog')

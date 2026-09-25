@@ -27,3 +27,7 @@ class DialogRepository(ABC):
     @abstractmethod
     async def find_by_id(self, dialog_id: int) -> Optional[Dialog]:
         pass
+
+    @abstractmethod
+    async def get_last_task_dialog(self, user_id: int):
+        pass

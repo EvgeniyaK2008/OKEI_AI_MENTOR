@@ -20,7 +20,7 @@ class DetectStudentsAnswer:
         self.ai_service = ai_service
         self.dialog_repo = dialog_repo
 
-    async def execute(self, question_id: str) -> str | bool:
+    async def execute(self, question_id: str) -> DetectStudentsAnswerResponse:
         # get the last question_id and the first appearing in the dialog to pass into the model
         # then pass the dialog to the model
         # ask to get the exact message with answer
@@ -44,9 +44,7 @@ class DetectStudentsAnswer:
 
             Инструкции:
             - Если студент дал окончательный ответ на задание, верни ТОЛЬКО текст его ответа
-            - Если ответа нет или студент ещё думает, верни СТРОГО слово NO_ANSWER
-
-            Твой ответ:"""
+            - Если ответа нет или студент ещё думает, верни СТРОГО слово NO_ANSWER"""
 
         response: str = await self.ai_service.get_ai_response_with_context(user_message=prompt, context=context)
         if response.strip().upper() == 'NO_ANSWER':

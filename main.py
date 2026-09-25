@@ -2,9 +2,10 @@
 import logging
 from dotenv import load_dotenv
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
-from fastapi import FastAPI, Request, Depends, Query
+from fastapi import FastAPI, Request, Depends, Query, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
@@ -26,7 +27,7 @@ from application.services.user_service import UserService
 from application.services.dialog_service import DialogService
 from application.services.auth import hash_password, verify_password, create_access_token, get_current_user
 
-from application.use_cases.start_skill_session import StartSkillSession, StartSkillSessionResponse
+from application.use_cases.start_skill_session import StartSkillSession
 from application.use_cases.get_skill_for_student import GetSkillForStudent
 from application.use_cases.get_chat_response import GetChatResponseWithContext, UserMessage, GetChatResponseWithContextResponse
 from application.use_cases.evaluate_student_answer import EvaluateStudentAnswer
@@ -51,8 +52,8 @@ class ErrorResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(examples=["ivanov"])
-    password: str = Field(examples=["supersecret1"])
+    username: str = Field(examples=["ii"])
+    password: str = Field(examples=["ii"])
 
 
 class RegisterRequest(BaseModel):
@@ -95,17 +96,20 @@ class SkillItem(BaseModel):
 
 
 class ProgressItem(BaseModel):
+    skill_id: int = Field(description="ID навыка, соответствует ID из GET /skills")
     skill: str = Field(description="Название навыка из матрицы компетенций", examples=["Введение в ИИ и машинное обучение"])
     level: int = Field(ge=0, le=100, description="Процент освоения навыка, 0–100. Пересчитывается после проверки практических заданий; для нового пользователя прогресс пуст", examples=[50])
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=4000, description="Сообщение ментору. Ментор отвечает наводящими вопросами и подсказками, а не готовым решением. Для получения практического задания -POST /task", examples=["Объясни, чем список отличается от кортежа в Python"])
+    message: str = Field(min_length=1, max_length=4000, description="Сообщение ментору. Ментор отвечает наводящими вопросами и подсказками, а не готовым решением.", examples=["Объясни, чем список отличается от кортежа в Python"])
+    question_id: str | None = Field(None, description="ID практической сессии (из POST /task). Если присутствует, сообщение считается ответом на задание и запускает оценку.", examples=["8f2a4c1e-..."])
 
 
 class ChatResponse(BaseModel):
     message: str = Field(description="Ответ ментора: наводящий вопрос, подсказка или разбор попытки", examples=["Верно мыслишь. А что произойдёт с кортежем, если попробовать добавить в него элемент?"])
-    question_id: str | None = Field(None, description="ID практической сессии (POST /task), если ответ относится к заданию; в свободном диалоге - null", examples=["8f2a4c1e-..."])
+    question_id: str | None = Field(None, description="ID практической сессии, к которой относится ответ", examples=["8f2a4c1e-..."])
+    assessment: dict | None = Field(None, description="Результат оценки ответа (score, feedback), если детектор сработал. Пока обновляется асинхронно через GET /progress.")
 
 
 class TaskResponse(BaseModel):
@@ -117,13 +121,14 @@ class MessageItem(BaseModel):
     id: str = Field(description="Уникальный ключ сообщения для рендера списка", examples=["12user"])
     role: Literal["user", "ai"] = Field(description="Автор сообщения: user - студент, ai - ментор")
     content: str = Field(examples=["Объясни, чем список отличается от кортежа"])
-    timestamp: datetime | None = Field(None, description="Время создания; null у служебных записей (например, у выданного задания без ответа студента)")
+    timestamp: datetime | None = Field(None, description="Время создания; null у служебных записей")
+    question_id: str | None = Field(None, description="ID задания, если сообщение к нему относится. Поле kind удалено так как начилие question_id указывает на тип сообщения с заданием")
 
 
 class ChatHistoryResponse(BaseModel):
     user_id: int = Field(examples=[11])
     username: str = Field(examples=["ivanov"])
-    messages: list[MessageItem] = Field(description="Хронологический список сообщений единственного диалога студента с ментором. У нового пользователя - пустой массив")
+    messages: list[MessageItem] = Field(description="Список последних сообщений диалога, отсортированных по времени убывания (новые сверху).")
 
 
 # ============================ Приложение ============================
@@ -136,7 +141,9 @@ logging.basicConfig(level=logging.INFO)
 
 bearer_docs = HTTPBearer(auto_error=False)
 
-app = FastAPI(title="AI Mentor")
+app = FastAPI(
+    title="AI Mentor"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -145,6 +152,36 @@ app.add_middleware(
     allow_methods=["*"],  
     allow_headers=["*"],  
 )
+
+
+# ============================ ГЛОБАЛЬНАЯ ОБРАБОТКА ОШИБОК ============================
+# --- ДОБАВЛЕНО: Обработчики ошибок для предсказуемого ответа фронтенду ---
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Обрабатывает стандартные HTTP ошибки (401, 404, 409 и т.д.)"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorResponse(error=str(exc.detail)).model_dump()
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Обрабатывает ошибки валидации Pydantic (422 Unprocessable Entity)"""
+    error_msg = exc.errors()[0]["msg"] if exc.errors() else "Ошибка валидации данных"
+    return JSONResponse(
+        status_code=422,
+        content=ErrorResponse(error=f"Ошибка валидации: {error_msg}").model_dump()
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Обрабатывает все непредвиденные ошибки сервера (500 Internal Server Error)"""
+    logger.error(f"Необработанная ошибка на сервере: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content=ErrorResponse(error="Внутренняя ошибка сервера. Попробуйте позже.").model_dump()
+    )
 
 
 # ============================ Фабрики зависимостей ============================
@@ -263,7 +300,7 @@ async def get_me(
 
 @app.post("/login", response_model=LoginResponse, tags=["auth"],
           summary="Вход и получение токена", description="Проверяет логин/пароль и выдаёт JWT вместе с профилем.",
-          responses={401: {"model": ErrorResponse, "description": "Неверный лIcon или пароль"}})
+          responses={401: {"model": ErrorResponse, "description": "Неверный логин или пароль"}})
 async def login_page(
     data: LoginRequest,
     user_repo: UserRepository = Depends(get_user_repo),
@@ -289,7 +326,7 @@ async def login_page(
 
 
 @app.post("/register", response_model=RegisterResponse, status_code=201, tags=["auth"],
-          summary="Регистрация студента", description="Создаёт пользователя. Ошибка 409 — логин уже занят.",
+          summary="Регистрация студента", description="Создаёт пользователя. Ошибка 409 — логин уже занят. Группа выбирается из списка, неверная группа невозможна.",
           responses={409: {"model": ErrorResponse, "description": "Username уже занят"}})
 async def register(
     data: RegisterRequest,
@@ -328,7 +365,7 @@ async def get_skills(
 
 
 @app.get("/progress", response_model=list[ProgressItem], tags=["study"], dependencies=[Depends(bearer_docs)],
-         summary="Прогресс студента", description="Проценты освоения навыков (0–100).",
+         summary="Прогресс студента", description="Проценты освоения навыков (0–100). Обновляется после детекции ответа моделью.",
          responses={401: {"model": ErrorResponse}})
 async def get_progress(
     request: Request,
@@ -341,7 +378,7 @@ async def get_progress(
     result = []
     for el in student_progress:
         skill: SkillMatrix = await matrix_repo.find_by_id(el.skill_id)
-        result.append(ProgressItem(skill=skill.skill, level=el.level))
+        result.append(ProgressItem(skill_id=el.skill_id, skill=skill.skill, level=el.level))
     return result
 
 
@@ -356,51 +393,90 @@ async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_grou
 
 
 @app.post("/task", response_model=TaskResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-          summary="Начать практическую сессию", description="Ментор генерирует задание под специальный курс.",
-          responses={401: {"model": ErrorResponse}})
+          summary="Начать практическую сессию", 
+          description="Ментор генерирует НОВОЕ задание при каждом вызове. Если навыков нет или группа не указана, вернет ошибку. Задание считается завершенным, когда ИИ-оценщик детектирует ответ в истории чата.",
+          responses={
+              401: {"model": ErrorResponse, "description": "Нет токена"},
+              500: {"model": ErrorResponse, "description": "Внутренняя ошибка или недоступность AI"},
+              503: {"model": ErrorResponse, "description": "Нет доступных навыков для генерации задания"}
+          })
 async def start_task(
     request: Request,
-    use_case: StartSkillSession = Depends(get_start_skill_session),
+    task_case: StartSkillSession = Depends(get_start_skill_session),
 ):
     user_id = get_current_user(request)["user_id"]
-    result = await use_case.execute(user_id)
+    result = await task_case.execute(user_id)
     return TaskResponse(question=result.question, question_id=result.question_id)
 
 
+@app.get("/task/current", response_model=TaskResponse | None, tags=["chat"], dependencies=[Depends(bearer_docs)],
+         summary="Текущее активное задание",
+         description="Возвращает последнее выданное задание, если оно есть. Если активного задания нет (в диалоге нет сообщений с question_id), возвращает null.")
+async def get_current_task(
+    request: Request,
+    dialog_repo: DialogRepository = Depends(get_dialog_repo)
+):
+    user_id = get_current_user(request)["user_id"]
+    
+    last_dialog = await dialog_repo.get_last_task_dialog(user_id=user_id)
+    
+    if not last_dialog or not last_dialog.ai_response:
+        return None
+        
+    return TaskResponse(
+        question=last_dialog.ai_response, 
+        question_id=last_dialog.question_id
+    )
+
+
 @app.post("/chat", response_model=ChatResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-          summary="Сообщение ментору", description="Единственный диалог студента с ментором.",
-          responses={401: {"model": ErrorResponse}})
+          summary="Сообщение ментору", 
+          description="Единственный диалог. Если передан question_id, сообщение считается ответом на задание. ИИ-детектор проверяет историю: если ответ завершен, запускается оценка (прогресс обновляется асинхронно).",
+          responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse, "description": "Ошибка AI или БД"}})
 async def chat(
     request: Request,
     data: ChatRequest,
     dialog_service: DialogService = Depends(get_dialog_service),
     ai_service: AIService = Depends(get_ai_mentor),
+    detection_case: DetectStudentsAnswer = Depends(get_detect_students_answer),
+    evaluate_case: EvaluateStudentAnswer = Depends(get_evaluate_student_answer)
 ):
-    user_id = get_current_user(request)["user_id"]
+    user_id: int = get_current_user(request)["user_id"]
     user_message = UserMessage(user_id=user_id, message=data.message)
+    user_message_time: datetime = datetime.now()
+
+    if data.question_id:
+        answer_detected: DetectStudentsAnswerResponse = await detection_case.execute(data.question_id)
+        if answer_detected.answer_found:
+            await evaluate_case.execute(data.question_id)    
     
-    # Инициализируем use case без аргументов (как в твоём коде) и передаём зависимости в execute
     use_case = GetChatResponseWithContext()
     result: GetChatResponseWithContextResponse = await use_case.execute(
         user_message=user_message,
         dialog_service=dialog_service,
         ai_service=ai_service
     )
+    ai_response_time: datetime = datetime.now()
 
     await dialog_service.save(
         user_id=user_id,
         user_message=data.message,
         ai_response=result.response,
-        question_id=None,
-        user_message_time=datetime.now(),
-        ai_response_time=datetime.now(),
+        question_id=data.question_id, 
+        user_message_time=user_message_time,
+        ai_response_time=ai_response_time,
     )
-    return ChatResponse(message=result.response, question_id=None)
+    
+    return ChatResponse(
+        message=result.response, 
+        question_id=data.question_id,
+        assessment=None 
+    )
 
 
 @app.get("/chat/history", response_model=ChatHistoryResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-         summary="История диалога", description="Хронологическая история диалога.",
-         responses={401: {"model": ErrorResponse}})
+         summary="История диалога", 
+         description="Возвращает последние N сообщений, отсортированные хронологически (старые сообщения сверху, новые снизу).")
 async def get_chat_history(
     request: Request,
     limit: int = Query(50, ge=1, le=200, description="Сколько сообщений вернуть, не более 200"),
@@ -408,26 +484,28 @@ async def get_chat_history(
 ):
     current_user = get_current_user(request)
     user_id = current_user["user_id"]
+    
     dialogs = await dialog_service.get_user_history(user_id=user_id, limit=limit, question_id=None)
 
     messages = []
     for dialog in dialogs:
+        
         if dialog.user_message:
-            messages.append(MessageItem(id=f"{dialog.id}", role="user", content=dialog.user_message, timestamp=dialog.user_message_time))
+            messages.append(MessageItem(
+                id=f"{dialog.id}_user", 
+                role="user", 
+                content=dialog.user_message, 
+                timestamp=dialog.user_message_time,
+                question_id=dialog.question_id,
+            ))
         if dialog.ai_response:
-            messages.append(MessageItem(id=f"{dialog.id}", role="ai", content=dialog.ai_response, timestamp=dialog.ai_response_time))
+            messages.append(MessageItem(
+                id=f"{dialog.id}_ai", 
+                role="ai", 
+                content=dialog.ai_response, 
+                timestamp=dialog.ai_response_time,
+                question_id=dialog.question_id
+            ))
+    messages.reverse()
 
     return ChatHistoryResponse(user_id=user_id, username=current_user["username"], messages=messages)
-
-
-@app.post("/task/{question_id}/evaluate", tags=["chat"], dependencies=[Depends(bearer_docs)],
-          summary="Оценить ответ студента", description="Запускает оценку прогресса по завершённой сессии.",
-          responses={401: {"model": ErrorResponse}})
-async def evaluate_task(
-    request: Request,
-    question_id: str,
-    use_case: EvaluateStudentAnswer = Depends(get_evaluate_student_answer),
-):
-    # Твой use case ожидает int, поэтому приводим тип (или измени signature use case на str, если нужно)
-    await use_case.execute(question_id=int(question_id))
-    return {"message": "Оценка сохранена"}
