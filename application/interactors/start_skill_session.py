@@ -18,7 +18,7 @@ from application.repositories.specialty_repository import SpecialtyRepository
 from application.repositories.student_progress_repository import StudentProgressRepository
 from application.repositories.user_repository import UserRepository
 from application.services.dialog_service import DialogService
-from application.use_cases.get_skill_for_student import GetSkillForStudent
+from application.interactors.get_skill_for_student import GetSkillForStudent
 from application.repositories.group_repository import GroupRepository
 
 logger = logging.getLogger(__name__)

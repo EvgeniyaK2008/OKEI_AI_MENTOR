@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum
 from domain.entities.study import Groups
 from typing import Optional, Any
@@ -20,6 +21,9 @@ class User:
     last_name: str = None
     role: UserRole = field(default_factory=lambda: UserRole.STUDENT)
     group: Any = None
+    current_streak: int = 0
+    longest_streak: int = 0
+    last_activity_date: date | None = None
 
     def get_group(self):
         return self.group

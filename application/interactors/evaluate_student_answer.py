@@ -4,8 +4,10 @@ import re
 from application.ports.ai.ai_port import AIService
 from application.repositories.dialog_repository import DialogRepository
 from application.repositories.student_progress_repository import StudentProgressRepository
+from application.repositories.user_repository import UserRepository
 from application.services.dialog_service import DialogService
-from application.use_cases.get_skill_for_student import GetSkillForStudent
+from application.services.streak_service import StreakService
+from application.interactors.get_skill_for_student import GetSkillForStudent
 from domain.entities.dialog import Dialog
 from domain.entities.skill_matrix import SkillMatrix
 from domain.entities.student_progress import StudentProgress
@@ -14,7 +16,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 @dataclass
-class EvaluateStudentAnswerRespose:
+class EvaluateStudentAnswerResponse:
     level: int
 
 
@@ -25,15 +27,17 @@ class EvaluateStudentAnswer:
             student_progress_repo: StudentProgressRepository,
             get_skill_for_student: GetSkillForStudent,
             dialog_repo: DialogRepository,
-            ai_service: AIService
+            ai_service: AIService,
+            user_repo: UserRepository
             ):
         self.dialog_service = dialog_service
         self.student_progress_repo = student_progress_repo
         self.get_skill_for_student = get_skill_for_student
         self.dialog_repo = dialog_repo
         self.ai_service = ai_service
+        self.streak_service = StreakService(user_repo)
         
-    async def execute(self, question_id: int):
+    async def execute(self, question_id: str) -> EvaluateStudentAnswerResponse:
         question_history: list[Dialog] = await self.dialog_repo.get_dialogs_by_question(question_id=question_id)
         user_id: int = question_history[0].user_id
         result = await self._get_student_result(question_history=question_history)
@@ -46,7 +50,8 @@ class EvaluateStudentAnswer:
         )
 
         await self.student_progress_repo.upsert(progress=student_progress)
-        return EvaluateStudentAnswerRespose(result['level'])
+        await self.streak_service.update(user_id)
+        return EvaluateStudentAnswerResponse(result['level'])
 
     async def _parse_ai_result(self, ai_response: str):
         ai_response = ai_response.strip()

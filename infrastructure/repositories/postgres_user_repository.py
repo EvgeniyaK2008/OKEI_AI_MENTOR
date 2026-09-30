@@ -1,7 +1,9 @@
 import logging
+from datetime import date 
 from sqlalchemy import select, update, delete 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload 
+
 from domain.exceptions.errors import UserNotFound
 from application.repositories.user_repository import UserRepository
 from domain.entities.user import User, UserRole
@@ -41,7 +43,10 @@ class AsyncPostgresUserRepository(UserRepository):
             middle_name=db_user.middle_name,
             last_name=db_user.last_name,
             role=UserRole(db_user.role),
-            group=group
+            group=group,
+            current_streak=db_user.current_streak,
+            longest_streak=db_user.longest_streak,
+            last_activity_date=db_user.last_activity_date,
         )
     
     async def find_by_id(self, user_id: int) -> User | None:
@@ -76,6 +81,7 @@ class AsyncPostgresUserRepository(UserRepository):
         return self._to_domain(db_user)
 
     async def save(self, user: User) -> User:
+        """Создает НОВОГО пользователя в БД (INSERT)."""
         db_user = UserModel(
             id=user.id,
             username=user.username,        
@@ -84,12 +90,16 @@ class AsyncPostgresUserRepository(UserRepository):
             middle_name=user.middle_name,
             last_name=user.last_name,
             role=user.role.value if hasattr(user.role, 'value') else user.role,
-            group_id=user.group.id if user.group else None
+            group_id=user.group.id if user.group else None,
+            current_streak=user.current_streak,
+            longest_streak=user.longest_streak,
+            last_activity_date=user.last_activity_date,
         )
         self.session.add(db_user)
         await self.session.commit()
         await self.session.refresh(db_user) 
         user.id = db_user.id
+        
         return user
 
     async def update(self, user: User) -> User:
@@ -104,12 +114,15 @@ class AsyncPostgresUserRepository(UserRepository):
                     middle_name=user.middle_name,
                     last_name=user.last_name,
                     role=user.role.value if hasattr(user.role, 'value') else user.role,
-                    group_id=user.group.id if user.group.id else None 
+                    group_id=user.group.id if user.group else None,
+                    current_streak=user.current_streak,
+                    longest_streak=user.longest_streak,
+                    last_activity_date=user.last_activity_date,
                 )
             )
             await self.session.execute(stmt)
             await self.session.commit()
-            logger.info(f"User {user.id} updated")
+            logger.info(f"User {user.id} updated successfully")
             return user
         except Exception as e:
             await self.session.rollback()

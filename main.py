@@ -27,11 +27,13 @@ from application.services.user_service import UserService
 from application.services.dialog_service import DialogService
 from application.services.auth import hash_password, verify_password, create_access_token, get_current_user
 
-from application.use_cases.start_skill_session import StartSkillSession
-from application.use_cases.get_skill_for_student import GetSkillForStudent
-from application.use_cases.get_chat_response import GetChatResponseWithContext, UserMessage, GetChatResponseWithContextResponse
-from application.use_cases.evaluate_student_answer import EvaluateStudentAnswer
-from application.use_cases.detect_student_answer import DetectStudentsAnswer, DetectStudentsAnswerResponse
+from application.interactors.start_skill_session import StartSkillSession
+from application.interactors.get_skill_for_student import GetSkillForStudent
+from application.interactors.get_chat_response import GetChatResponseWithContext, UserMessage, GetChatResponseWithContextResponse
+from application.interactors.evaluate_student_answer import EvaluateStudentAnswer, EvaluateStudentAnswerResponse
+from application.interactors.detect_student_answer import DetectStudentsAnswer, DetectStudentsAnswerResponse
+
+from application.interactors.get_streak import GetStreak, GetStreakResponse
 
 from domain.entities.skill_matrix import SkillMatrix
 from domain.entities.student_progress import StudentProgress
@@ -89,6 +91,11 @@ class GroupItem(BaseModel):
     name: str = Field(description="Человекочитаемое имя: <курс><сокращение специальности><номер группы>", examples=["2ИИ1"])
 
 
+class StreakItem(BaseModel):
+    current_streak: int = Field(description="Текущая серия дней выполнения заданий", examples=[5])
+    longest_streak: int = Field(description="Рекорд серии дней", examples=[12])
+
+
 class SkillItem(BaseModel):
     id: int = Field(examples=[35])
     name: str = Field(description="Название навыка из матрицы компетенций", examples=["Введение в ИИ и машинное обучение"])
@@ -109,8 +116,10 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     message: str = Field(description="Ответ ментора: наводящий вопрос, подсказка или разбор попытки", examples=["Верно мыслишь. А что произойдёт с кортежем, если попробовать добавить в него элемент?"])
     question_id: str | None = Field(None, description="ID практической сессии, к которой относится ответ", examples=["8f2a4c1e-..."])
-    assessment: dict | None = Field(None, description="Результат оценки ответа (score, feedback), если детектор сработал. Если присутствует, задание считается выполненным.")
-
+    assessment: EvaluateStudentAnswerResponse | None = Field(
+        None, 
+        description="Результат оценки ответа (level), если детектор сработал. Если присутствует, задание считается выполненным."
+    )
 
 class TaskResponse(BaseModel):
     question: str = Field(description="Текст практического задания, подобранного под слабый навык, специальность и курс студента", examples=["Напишите функцию, которая... Критерии оценки: ..."])
@@ -122,13 +131,13 @@ class MessageItem(BaseModel):
     role: Literal["user", "ai"] = Field(description="Автор сообщения: user - студент, ai - ментор")
     content: str = Field(examples=["Объясни, чем список отличается от кортежа"])
     timestamp: datetime | None = Field(None, description="Время создания; null у служебных записей")
-    question_id: str | None = Field(None, description="ID задания, если сообщение к нему относится. Поле kind удалено так как начилие question_id указывает на тип сообщения с заданием")
+    question_id: str | None = Field(None, description="ID задания, если сообщение к нему относится.")
 
 
 class ChatHistoryResponse(BaseModel):
     user_id: int = Field(examples=[11])
     username: str = Field(examples=["ivanov"])
-    messages: list[MessageItem] = Field(description="Список последних сообщений диалога, отсортированных по времени убывания (новые сверху).")
+    messages: list[MessageItem] = Field(description="Список последних сообщений диалога, отсортированных хронологически (старые сверху, новые снизу).")
 
 
 # ============================ Приложение ============================
@@ -141,9 +150,7 @@ logging.basicConfig(level=logging.INFO)
 
 bearer_docs = HTTPBearer(auto_error=False)
 
-app = FastAPI(
-    title="AI Mentor"
-)
+app = FastAPI(title="AI Mentor")
 
 app.add_middleware(
     CORSMiddleware,
@@ -155,11 +162,9 @@ app.add_middleware(
 
 
 # ============================ ГЛОБАЛЬНАЯ ОБРАБОТКА ОШИБОК ============================
-# --- ДОБАВЛЕНО: Обработчики ошибок для предсказуемого ответа фронтенду ---
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Обрабатывает стандартные HTTP ошибки (401, 404, 409 и т.д.)"""
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorResponse(error=str(exc.detail)).model_dump()
@@ -167,7 +172,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Обрабатывает ошибки валидации Pydantic (422 Unprocessable Entity)"""
     error_msg = exc.errors()[0]["msg"] if exc.errors() else "Ошибка валидации данных"
     return JSONResponse(
         status_code=422,
@@ -176,7 +180,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Обрабатывает все непредвиденные ошибки сервера (500 Internal Server Error)"""
     logger.error(f"Необработанная ошибка на сервере: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
@@ -264,13 +267,19 @@ async def get_evaluate_student_answer(db: AsyncSession = Depends(get_db)) -> Eva
             user_repo=user_repo
         ),
         dialog_repo=dialog_repo,
-        ai_service=YandexAIMainModelService(config.secondary_ai)
+        ai_service=YandexAIMainModelService(config.secondary_ai),
+        user_repo=user_repo, 
     )
 
 async def get_detect_students_answer(db: AsyncSession = Depends(get_db)) -> DetectStudentsAnswer:
     return DetectStudentsAnswer(
         ai_service=YandexAIMainModelService(config.secondary_ai),
         dialog_repo=AsyncPostgresDialogRepository(db)
+    )
+
+async def get_user_streak(db: AsyncSession = Depends(get_db)) -> GetStreak:
+    return GetStreak(
+        user_repo=AsyncPostgresUserRepository(db)
     )
 
 
@@ -326,7 +335,7 @@ async def login_page(
 
 
 @app.post("/register", response_model=RegisterResponse, status_code=201, tags=["auth"],
-          summary="Регистрация студента", description="Создаёт пользователя. Ошибка 409 — логин уже занят. Группа выбирается из списка, неверная группа невозможна.",
+          summary="Регистрация студента", description="Создаёт пользователя. Ошибка 409 — логин уже занят.",
           responses={409: {"model": ErrorResponse, "description": "Username уже занят"}})
 async def register(
     data: RegisterRequest,
@@ -365,7 +374,7 @@ async def get_skills(
 
 
 @app.get("/progress", response_model=list[ProgressItem], tags=["study"], dependencies=[Depends(bearer_docs)],
-         summary="Прогресс студента", description="Проценты освоения навыков (0–100). Обновляется после детекции ответа моделью.",
+         summary="Прогресс студента", description="Проценты освоения навыков (0–100).",
          responses={401: {"model": ErrorResponse}})
 async def get_progress(
     request: Request,
@@ -392,9 +401,24 @@ async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_grou
     ]
 
 
+@app.get('/streak', response_model=StreakItem, tags=["study"], dependencies=[Depends(bearer_docs)],
+         summary="Стрик пользователя", description="Текущая и максимальная серия дней выполнения заданий.")
+async def get_streak(
+    request: Request,
+    use_case: GetStreak = Depends(get_user_streak)
+):
+    user_id = get_current_user(request)["user_id"]
+    result: GetStreakResponse = await use_case.execute(user_id)
+    
+    return StreakItem(
+        current_streak=result.current_streak,
+        longest_streak=result.longest_streak
+    )
+
+
 @app.post("/task", response_model=TaskResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
           summary="Начать практическую сессию", 
-          description="Ментор генерирует НОВОЕ задание при каждом вызове. Если навыков нет или группа не указана, вернет ошибку. Задание считается завершенным, когда ИИ-оценщик детектирует ответ в истории чата.",
+          description="Ментор генерирует НОВОЕ задание при каждом вызове.",
           responses={
               401: {"model": ErrorResponse, "description": "Нет токена"},
               500: {"model": ErrorResponse, "description": "Внутренняя ошибка или недоступность AI"},
@@ -411,13 +435,12 @@ async def start_task(
 
 @app.get("/task/current", response_model=TaskResponse | None, tags=["chat"], dependencies=[Depends(bearer_docs)],
          summary="Текущее активное задание",
-         description="Возвращает последнее выданное задание, если оно есть. Если активного задания нет (в диалоге нет сообщений с question_id), возвращает null.")
+         description="Возвращает последнее выданное задание, если оно есть.")
 async def get_current_task(
     request: Request,
     dialog_repo: DialogRepository = Depends(get_dialog_repo)
 ):
     user_id = get_current_user(request)["user_id"]
-    
     last_dialog = await dialog_repo.get_last_task_dialog(user_id=user_id)
     
     if not last_dialog or not last_dialog.ai_response:
@@ -449,7 +472,7 @@ async def chat(
     if data.question_id:
         answer_detected: DetectStudentsAnswerResponse = await detection_case.execute(data.question_id)
         if answer_detected.answer_found:
-            assessment =  await evaluate_case.execute(data.question_id)    
+            assessment = await evaluate_case.execute(data.question_id) 
             
     use_case = GetChatResponseWithContext()
     result: GetChatResponseWithContextResponse = await use_case.execute(
@@ -477,7 +500,7 @@ async def chat(
 
 @app.get("/chat/history", response_model=ChatHistoryResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
          summary="История диалога", 
-         description="Возвращает последние N сообщений, отсортированные хронологически (старые сообщения сверху, новые снизу).")
+         description="Возвращает последние N сообщений, отсортированные хронологически.")
 async def get_chat_history(
     request: Request,
     limit: int = Query(50, ge=1, le=200, description="Сколько сообщений вернуть, не более 200"),
@@ -490,7 +513,6 @@ async def get_chat_history(
 
     messages = []
     for dialog in dialogs:
-        
         if dialog.user_message:
             messages.append(MessageItem(
                 id=f"{dialog.id}_user", 

@@ -1,5 +1,5 @@
-from datetime import datetime
-from sqlalchemy import BigInteger, Text, ForeignKey, String, Boolean, DateTime, UniqueConstraint, func
+from datetime import date, datetime
+from sqlalchemy import BigInteger, Date, Integer, Text, ForeignKey, String, Boolean, DateTime, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from infrastructure.database.connection import Base 
 
@@ -51,6 +51,9 @@ class UserModel(Base):
     last_name: Mapped[str | None] = mapped_column(Text)
     role: Mapped[str | None] = mapped_column(Text, default="student")
     group_id: Mapped[int | None] = mapped_column(ForeignKey('groups.id'))
+    current_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    longest_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_activity_date: Mapped[date | None] = mapped_column(Date, default=None, nullable=True)
 
     group: Mapped["GroupModel"] = relationship("GroupModel", back_populates='users')
     dialog: Mapped[list["DialogModel"]] = relationship("DialogModel", back_populates='user')
