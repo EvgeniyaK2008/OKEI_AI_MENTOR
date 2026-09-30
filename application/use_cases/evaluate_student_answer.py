@@ -13,6 +13,11 @@ from domain.entities.student_progress import StudentProgress
 import logging
 logger = logging.getLogger(__name__)
 
+@dataclass
+class EvaluateStudentAnswerRespose:
+    level: int
+
+
 class EvaluateStudentAnswer:
     def __init__(
             self,
@@ -41,6 +46,7 @@ class EvaluateStudentAnswer:
         )
 
         await self.student_progress_repo.upsert(progress=student_progress)
+        return EvaluateStudentAnswerRespose(result['level'])
 
     async def _parse_ai_result(self, ai_response: str):
         ai_response = ai_response.strip()
@@ -94,13 +100,16 @@ class EvaluateStudentAnswer:
 
         ai_answer = await self.ai_service.get_simple_response(user_message=content)  
 
-        level, weaknesses = self._parse_ai_result(ai_answer)
+        level, weaknesses = await self._parse_ai_result(ai_answer)
 
         result = {
             'level': level,
             'weaknesses': weaknesses,
             'skill': skill_id
         }
+
+        print('+' * 50)
+        print(result['level'], result['weaknesses'])
 
         return result
 

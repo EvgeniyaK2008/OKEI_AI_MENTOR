@@ -8,7 +8,7 @@ from domain.entities.dialog import Dialog
 @dataclass
 class DetectStudentsAnswerResponse:
     answer_found: bool
-    response: str | None
+    answer_message: str | None
 
 
 class DetectStudentsAnswer:
@@ -30,11 +30,12 @@ class DetectStudentsAnswer:
         if not question_history:
             return DetectStudentsAnswerResponse(answer_found=False, answer_message=None)
 
-        context = [
-            {"role": "assistant", "content": dialog.ai_response} if dialog.ai_response 
-            else {"role": "user", "content": dialog.user_message}
-            for dialog in question_history
-        ]
+        context = []
+        for dialog in question_history:
+            if dialog.user_message:
+                context.append({"role": "user", "content": dialog.user_message})
+            if dialog.ai_response:
+                context.append({"role": "assistant", "content": dialog.ai_response})
         
         question: str = question_history[0].ai_response
 
@@ -46,10 +47,16 @@ class DetectStudentsAnswer:
             - Если студент дал окончательный ответ на задание, верни ТОЛЬКО текст его ответа
             - Если ответа нет или студент ещё думает, верни СТРОГО слово NO_ANSWER"""
 
-        response: str = await self.ai_service.get_ai_response_with_context(user_message=prompt, context=context)
-        if response.strip().upper() == 'NO_ANSWER':
-            return DetectStudentsAnswerResponse(answer_found=False, answer_message=None)
+        print('='*50)
+        print(prompt)
         
+        response: str = await self.ai_service.get_ai_response_with_context(user_message=prompt, context=context)
+
+        print('-'*50)
+        if response.strip().upper() == 'NO_ANSWER':
+            print(f'НЕТ ОТВЕТА - {response.strip().upper()}')
+            return DetectStudentsAnswerResponse(answer_found=False, answer_message=None)
+        print(f'ОТВЕТ - {response.strip()}')
         return DetectStudentsAnswerResponse(answer_found=True, answer_message=response.strip())
 
     

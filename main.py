@@ -2,7 +2,7 @@
 import logging
 from dotenv import load_dotenv
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import FastAPI, Request, Depends, Query, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -109,7 +109,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     message: str = Field(description="Ответ ментора: наводящий вопрос, подсказка или разбор попытки", examples=["Верно мыслишь. А что произойдёт с кортежем, если попробовать добавить в него элемент?"])
     question_id: str | None = Field(None, description="ID практической сессии, к которой относится ответ", examples=["8f2a4c1e-..."])
-    assessment: dict | None = Field(None, description="Результат оценки ответа (score, feedback), если детектор сработал. Пока обновляется асинхронно через GET /progress.")
+    assessment: dict | None = Field(None, description="Результат оценки ответа (score, feedback), если детектор сработал. Если присутствует, задание считается выполненным.")
 
 
 class TaskResponse(BaseModel):
@@ -444,12 +444,13 @@ async def chat(
     user_id: int = get_current_user(request)["user_id"]
     user_message = UserMessage(user_id=user_id, message=data.message)
     user_message_time: datetime = datetime.now()
+    assessment = None
 
     if data.question_id:
         answer_detected: DetectStudentsAnswerResponse = await detection_case.execute(data.question_id)
         if answer_detected.answer_found:
-            await evaluate_case.execute(data.question_id)    
-    
+            assessment =  await evaluate_case.execute(data.question_id)    
+            
     use_case = GetChatResponseWithContext()
     result: GetChatResponseWithContextResponse = await use_case.execute(
         user_message=user_message,
@@ -470,7 +471,7 @@ async def chat(
     return ChatResponse(
         message=result.response, 
         question_id=data.question_id,
-        assessment=None 
+        assessment=assessment 
     )
 
 
