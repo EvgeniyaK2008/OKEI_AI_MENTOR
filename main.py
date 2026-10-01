@@ -59,12 +59,12 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=32, description="Логин студента, уникален", examples=["ivanov"])
+    username: str = Field(min_length=3, max_length=32, description="Логин пользователя, уникален", examples=["ivanov"])
     password: str = Field(min_length=8, description="Пароль, хранится только в виде хэша", examples=["supersecret1"])
-    group_id: int | None = Field(None, description="ID учебной группы из GET /groups. Если не указан студент без группы", examples=[3])
-    first_name: str = Field("", description="Обязательно при регистрации, можно оставить пустым", examples=["Иван"])
-    middle_name: str = Field("", description="обязательно при регистрации", examples=["Иванович"])
-    last_name: str = Field("", description="Необязательно при регистрации", examples=["Иванов"])
+    group_id: int | None = Field(None, description="ID учебной группы из GET /groups.", examples=[3])
+    first_name: str = Field("", description="Имя", examples=["Иван"])
+    middle_name: str = Field("", description="Отчество", examples=["Иванович"])
+    last_name: str = Field("", description="Фамилия", examples=["Иванов"])
     role: Literal["student", "teacher", "admin"] = Field(
         "student",
         description="Роль пользователя: student (по умолчанию), teacher или admin",
@@ -83,67 +83,65 @@ class UserPublic(BaseModel):
     first_name: str = Field(examples=["Иван"])
     middle_name: str = Field(examples=["Иванович"])
     last_name: str = Field(examples=["Иванов"])
-    group: str = Field(description="Название группы в формате <курс><специальность><номер>; пустая строка если группы нет", examples=["2ИИ1"])
+    group: str = Field(description="Название группы", examples=["2ИИ1"])
+    role: str = Field(description="Роль пользователя", examples=["student"])
 
 
 class LoginResponse(BaseModel):
-    token: str = Field(description="JWT Bearer-токен. Передавать в заголовке Authorization: Bearer <token>. Refresh-токена нет: после истечения срока жизни (задаётся в create_access_token) нужен повторный POST /login", examples=["eyJhbGciOiJIUzI1NiIs..."])
+    token: str = Field(description="JWT Bearer-токен.", examples=["eyJhbGciOiJIUzI1NiIs..."])
     user: UserPublic
 
 
 class GroupItem(BaseModel):
-    id: int = Field(description="ID учебной группы; передаётся в group_id при регистрации", examples=[3])
-    name: str = Field(description="Человекочитаемое имя: <курс><сокращение специальности><номер группы>", examples=["2ИИ1"])
+    id: int = Field(description="ID учебной группы", examples=[3])
+    name: str = Field(description="Человекочитаемое имя", examples=["2ИИ1"])
 
 
 class StreakItem(BaseModel):
-    current_streak: int = Field(description="Текущая серия дней выполнения заданий", examples=[5])
+    current_streak: int = Field(description="Текущая серия дней", examples=[5])
     longest_streak: int = Field(description="Рекорд серии дней", examples=[12])
 
 
 class SkillItem(BaseModel):
     id: int = Field(examples=[35])
-    name: str = Field(description="Название навыка из матрицы компетенций", examples=["Введение в ИИ и машинное обучение"])
-    description: str | None = Field(None, description="Критерии освоения навыка из матрицы компетенций")
+    name: str = Field(description="Название навыка", examples=["Введение в ИИ"])
+    description: str | None = Field(None, description="Критерии освоения")
 
 
 class ProgressItem(BaseModel):
-    skill_id: int = Field(description="ID навыка, соответствует ID из GET /skills")
-    skill: str = Field(description="Название навыка из матрицы компетенций", examples=["Введение в ИИ и машинное обучение"])
-    level: int = Field(ge=0, le=100, description="Процент освоения навыка, 0–100. Пересчитывается после проверки практических заданий; для нового пользователя прогресс пуст", examples=[50])
+    skill_id: int = Field(description="ID навыка")
+    skill: str = Field(description="Название навыка", examples=["Введение в ИИ"])
+    level: int = Field(ge=0, le=100, description="Процент освоения", examples=[50])
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=4000, description="Сообщение ментору. Ментор отвечает наводящими вопросами и подсказками, а не готовым решением.", examples=["Объясни, чем список отличается от кортежа в Python"])
-    question_id: str | None = Field(None, description="ID практической сессии (из POST /task). Если присутствует, сообщение считается ответом на задание и запускает оценку.", examples=["8f2a4c1e-..."])
+    message: str = Field(min_length=1, max_length=4000, description="Сообщение ментору", examples=["Объясни, чем список отличается от кортежа"])
+    question_id: str | None = Field(None, description="ID практической сессии", examples=["8f2a4c1e-..."])
 
 
 class ChatResponse(BaseModel):
-    message: str = Field(description="Ответ ментора: наводящий вопрос, подсказка или разбор попытки", examples=["Верно мыслишь. А что произойдёт с кортежем, если попробовать добавить в него элемент?"])
-    question_id: str | None = Field(None, description="ID практической сессии, к которой относится ответ", examples=["8f2a4c1e-..."])
-    assessment: EvaluateStudentAnswerResponse | None = Field(
-        None,
-        description="Результат оценки ответа (level), если детектор сработал. Если присутствует, задание считается выполненным."
-    )
+    message: str = Field(description="Ответ ментора", examples=["Верно мыслишь."])
+    question_id: str | None = Field(None, description="ID сессии", examples=["8f2a4c1e-..."])
+    assessment: EvaluateStudentAnswerResponse | None = Field(None, description="Результат оценки")
 
 
 class TaskResponse(BaseModel):
-    question: str = Field(description="Текст практического задания, подобранного под слабый навык, специальность и курс студента", examples=["Напишите функцию, которая... Критерии оценки: ..."])
-    question_id: str = Field(description="ID сессии задания; им помечаются записи истории, относящиеся к заданию", examples=["8f2a4c1e-..."])
+    question: str = Field(description="Текст задания", examples=["Напишите функцию..."])
+    question_id: str = Field(description="ID сессии задания", examples=["8f2a4c1e-..."])
 
 
 class MessageItem(BaseModel):
-    id: str = Field(description="Уникальный ключ сообщения для рендера списка", examples=["12user"])
-    role: Literal["user", "ai"] = Field(description="Автор сообщения: user - студент, ai - ментор")
+    id: str = Field(description="Уникальный ключ", examples=["12user"])
+    role: Literal["user", "ai"] = Field(description="Автор: user или ai")
     content: str = Field(examples=["Объясни, чем список отличается от кортежа"])
-    timestamp: datetime | None = Field(None, description="Время создания; null у служебных записей")
-    question_id: str | None = Field(None, description="ID задания, если сообщение к нему относится.")
+    timestamp: datetime | None = Field(None, description="Время создания")
+    question_id: str | None = Field(None, description="ID задания")
 
 
 class ChatHistoryResponse(BaseModel):
     user_id: int = Field(examples=[11])
     username: str = Field(examples=["ivanov"])
-    messages: list[MessageItem] = Field(description="Список последних сообщений диалога, отсортированных хронологически (старые сверху, новые снизу).")
+    messages: list[MessageItem] = Field(description="Список сообщений")
 
 
 # ============================ Приложение ============================
@@ -291,9 +289,9 @@ async def get_user_streak(db: AsyncSession = Depends(get_db)) -> GetStreak:
 
 # ============================ Роуты ============================
 
+# Обычная авторизация (любая роль может смотреть свой профиль)
 @app.get('/me', response_model=UserPublic, tags=["auth"], dependencies=[Depends(bearer_docs)],
-         summary="Текущий пользователь", description="Профиль по токену: кто и в какой группе.",
-         responses={401: {"model": ErrorResponse, "description": "Нет токена или токен недействителен"}})
+         summary="Текущий пользователь")
 async def get_me(
     request: Request,
     user_repo: UserRepository = Depends(get_user_repo),
@@ -309,13 +307,13 @@ async def get_me(
         group_name = str(group.year) + str(specialty.short_name) + str(group.group_number)
     return UserPublic(
         id=user.id, username=user.username, first_name=user.first_name or "",
-        middle_name=user.middle_name or "", last_name=user.last_name or "", group=group_name,
+        middle_name=user.middle_name or "", last_name=user.last_name or "", 
+        group=group_name, role=user.role
     )
 
 
 @app.post("/login", response_model=LoginResponse, tags=["auth"],
-          summary="Вход и получение токена", description="Проверяет логин/пароль и выдаёт JWT вместе с профилем.",
-          responses={401: {"model": ErrorResponse, "description": "Неверный логин или пароль"}})
+          summary="Вход и получение токена")
 async def login_page(
     data: LoginRequest,
     user_repo: UserRepository = Depends(get_user_repo),
@@ -339,13 +337,13 @@ async def login_page(
     return LoginResponse(
         token=token,
         user=UserPublic(id=user.id, username=user.username, first_name=user.first_name or "",
-                        middle_name=user.middle_name or "", last_name=user.last_name or "", group=group_name),
+                        middle_name=user.middle_name or "", last_name=user.last_name or "", 
+                        group=group_name, role=user.role),
     )
 
 
 @app.post("/register", response_model=RegisterResponse, status_code=201, tags=["auth"],
-          summary="Регистрация пользователя", description="Создаёт пользователя. Ошибка 409 — логин уже занят. Роль по умолчанию — student.",
-          responses={409: {"model": ErrorResponse, "description": "Username уже занят"}})
+          summary="Регистрация пользователя")
 async def register(
     data: RegisterRequest,
     service: UserService = Depends(get_user_service),
@@ -368,8 +366,10 @@ async def register(
     return RegisterResponse(user_id=user.id, username=user.username)
 
 
-@app.get("/skills", response_model=list[SkillItem], dependencies=[Depends(bearer_docs)], tags=["study"],
-         summary="Каталог навыков", description="Все навыки матриц компетенций.")
+# !!! ДВОЙНАЯ ЗАЩИТА: И авторизация, И проверка роли !!!
+@app.get("/skills", response_model=list[SkillItem], tags=["study"], 
+         dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
+         summary="Каталог навыков")
 async def get_skills(
     request: Request,
     user_repo: UserRepository = Depends(get_user_repo),
@@ -383,9 +383,9 @@ async def get_skills(
     return [SkillItem(id=m.id, name=m.skill, description=m.criterions) for m in matrices]
 
 
-@app.get("/progress", response_model=list[ProgressItem], tags=["study"], dependencies=[Depends(bearer_docs)],
-         summary="Прогресс студента", description="Проценты освоения навыков (0–100).",
-         responses={401: {"model": ErrorResponse}})
+@app.get("/progress", response_model=list[ProgressItem], tags=["study"], 
+         dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
+         summary="Прогресс студента")
 async def get_progress(
     request: Request,
     student_progress_repo: StudentProgressRepository = Depends(get_student_progress_repo),
@@ -402,7 +402,7 @@ async def get_progress(
 
 
 @app.get("/groups", response_model=list[GroupItem], tags=["study"],
-         summary="Список учебных групп", description="Активные группы колледжа для выбора при регистрации.")
+         summary="Список учебных групп")
 async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_group_repo)):
     groups = await group_repo.find_active_groups()
     return [
@@ -411,8 +411,9 @@ async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_grou
     ]
 
 
-@app.get('/streak', response_model=StreakItem, tags=["study"], dependencies=[Depends(bearer_docs)],
-         summary="Стрик пользователя", description="Текущая и максимальная серия дней выполнения заданий.")
+@app.get('/streak', response_model=StreakItem, tags=["study"], 
+         dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
+         summary="Стрик пользователя")
 async def get_streak(
     request: Request,
     use_case: GetStreak = Depends(get_user_streak)
@@ -426,14 +427,9 @@ async def get_streak(
     )
 
 
-@app.post("/task", response_model=TaskResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-          summary="Начать практическую сессию",
-          description="Ментор генерирует НОВОЕ задание при каждом вызове.",
-          responses={
-              401: {"model": ErrorResponse, "description": "Нет токена"},
-              500: {"model": ErrorResponse, "description": "Внутренняя ошибка или недоступность AI"},
-              503: {"model": ErrorResponse, "description": "Нет доступных навыков для генерации задания"}
-          })
+@app.post("/task", response_model=TaskResponse, tags=["chat"], 
+          dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
+          summary="Начать практическую сессию")
 async def start_task(
     request: Request,
     task_case: StartSkillSession = Depends(get_start_skill_session),
@@ -443,9 +439,9 @@ async def start_task(
     return TaskResponse(question=result.question, question_id=result.question_id)
 
 
-@app.get("/task/current", response_model=TaskResponse | None, tags=["chat"], dependencies=[Depends(bearer_docs)],
-         summary="Текущее активное задание",
-         description="Возвращает последнее выданное задание, если оно есть.")
+@app.get("/task/current", response_model=TaskResponse | None, tags=["chat"], 
+         dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
+         summary="Текущее активное задание")
 async def get_current_task(
     request: Request,
     dialog_repo: DialogRepository = Depends(get_dialog_repo)
@@ -462,10 +458,9 @@ async def get_current_task(
     )
 
 
-@app.post("/chat", response_model=ChatResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-          summary="Сообщение ментору",
-          description="Единственный диалог. Если передан question_id, сообщение считается ответом на задание.",
-          responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse, "description": "Ошибка AI или БД"}})
+@app.post("/chat", response_model=ChatResponse, tags=["chat"], 
+          dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
+          summary="Сообщение ментору")
 async def chat(
     request: Request,
     data: ChatRequest,
@@ -508,12 +503,12 @@ async def chat(
     )
 
 
-@app.get("/chat/history", response_model=ChatHistoryResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-         summary="История диалога",
-         description="Возвращает последние N сообщений, отсортированные хронологически.")
+@app.get("/chat/history", response_model=ChatHistoryResponse, tags=["chat"], 
+         dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
+         summary="История диалога")
 async def get_chat_history(
     request: Request,
-    limit: int = Query(50, ge=1, le=200, description="Сколько сообщений вернуть, не более 200"),
+    limit: int = Query(50, ge=1, le=200, description="Сколько сообщений вернуть"),
     dialog_service: DialogService = Depends(get_dialog_service),
 ):
     current_user = get_current_user(request)
