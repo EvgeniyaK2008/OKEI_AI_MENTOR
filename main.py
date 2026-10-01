@@ -25,7 +25,7 @@ from infrastructure.repositories.postgres_specialty_repository import AsyncPostg
 from infrastructure.ai.yandex_ai_service import YandexAIMainModelService
 from application.services.user_service import UserService
 from application.services.dialog_service import DialogService
-from application.services.auth import hash_password, verify_password, create_access_token, get_current_user
+from application.services.auth import hash_password, verify_password, create_access_token, get_current_user, require_role
 
 from application.interactors.start_skill_session import StartSkillSession
 from application.interactors.get_skill_for_student import GetSkillForStudent
@@ -65,6 +65,11 @@ class RegisterRequest(BaseModel):
     first_name: str = Field("", description="Обязательно при регистрации, можно оставить пустым", examples=["Иван"])
     middle_name: str = Field("", description="обязательно при регистрации", examples=["Иванович"])
     last_name: str = Field("", description="Необязательно при регистрации", examples=["Иванов"])
+    role: Literal["student", "teacher", "admin"] = Field(
+        "student",
+        description="Роль пользователя: student (по умолчанию), teacher или admin",
+        examples=["student"]
+    )
 
 
 class RegisterResponse(BaseModel):
@@ -117,9 +122,10 @@ class ChatResponse(BaseModel):
     message: str = Field(description="Ответ ментора: наводящий вопрос, подсказка или разбор попытки", examples=["Верно мыслишь. А что произойдёт с кортежем, если попробовать добавить в него элемент?"])
     question_id: str | None = Field(None, description="ID практической сессии, к которой относится ответ", examples=["8f2a4c1e-..."])
     assessment: EvaluateStudentAnswerResponse | None = Field(
-        None, 
+        None,
         description="Результат оценки ответа (level), если детектор сработал. Если присутствует, задание считается выполненным."
     )
+
 
 class TaskResponse(BaseModel):
     question: str = Field(description="Текст практического задания, подобранного под слабый навык, специальность и курс студента", examples=["Напишите функцию, которая... Критерии оценки: ..."])
@@ -156,8 +162,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -237,7 +243,7 @@ async def get_start_skill_session(db: AsyncSession = Depends(get_db)) -> StartSk
     specialty_repo = AsyncPostgresSpecialtyRepository(db)
     dialog_repo = AsyncPostgresDialogRepository(db)
     group_repo = AsyncPostgresGroupRepository(db)
-    
+
     return StartSkillSession(
         ai_service=YandexAIMainModelService(config.mentor_ai),
         dialog_service=DialogService(dialog_repo),
@@ -257,7 +263,7 @@ async def get_evaluate_student_answer(db: AsyncSession = Depends(get_db)) -> Eva
     student_progress_repo = AsyncPostgresStudentProgressRepository(db)
     skill_matrix_repo = AsyncPostgresSkillMatrixRepository(db)
     user_repo = AsyncPostgresUserRepository(db)
-    
+
     return EvaluateStudentAnswer(
         dialog_service=DialogService(dialog_repo),
         student_progress_repo=student_progress_repo,
@@ -268,7 +274,7 @@ async def get_evaluate_student_answer(db: AsyncSession = Depends(get_db)) -> Eva
         ),
         dialog_repo=dialog_repo,
         ai_service=YandexAIMainModelService(config.secondary_ai),
-        user_repo=user_repo, 
+        user_repo=user_repo,
     )
 
 async def get_detect_students_answer(db: AsyncSession = Depends(get_db)) -> DetectStudentsAnswer:
@@ -320,7 +326,10 @@ async def login_page(
     if not user or not verify_password(data.password, user.hashed_password):
         return JSONResponse(status_code=401, content=ErrorResponse(error="Invalid credentials").model_dump())
 
-    token = create_access_token({"username": user.username, "user_id": user.id})
+    token = create_access_token(
+        data={"username": user.username, "user_id": user.id},
+        role=user.role.value if hasattr(user.role, 'value') else user.role
+    )
     group_name = ""
     if user.group is not None:
         group = await group_repo.find_by_id(user.group.id)
@@ -335,7 +344,7 @@ async def login_page(
 
 
 @app.post("/register", response_model=RegisterResponse, status_code=201, tags=["auth"],
-          summary="Регистрация студента", description="Создаёт пользователя. Ошибка 409 — логин уже занят.",
+          summary="Регистрация пользователя", description="Создаёт пользователя. Ошибка 409 — логин уже занят. Роль по умолчанию — student.",
           responses={409: {"model": ErrorResponse, "description": "Username уже занят"}})
 async def register(
     data: RegisterRequest,
@@ -353,7 +362,8 @@ async def register(
 
     user = await service.get_or_create_user(
         username=data.username, hashed_password=hash_password(data.password),
-        first_name=data.first_name, middle_name=data.middle_name, last_name=data.last_name, group=group,
+        first_name=data.first_name, middle_name=data.middle_name, last_name=data.last_name,
+        group=group, role=data.role,
     )
     return RegisterResponse(user_id=user.id, username=user.username)
 
@@ -369,7 +379,7 @@ async def get_skills(
     user: User = await user_repo.find_by_id(user_id)
     course: int = user.get_course()
     specialty_id: int = user.get_specialty_id()
-    matrices = await matrix_repo.find_by_course_and_specialty(course, specialty_id) 
+    matrices = await matrix_repo.find_by_course_and_specialty(course, specialty_id)
     return [SkillItem(id=m.id, name=m.skill, description=m.criterions) for m in matrices]
 
 
@@ -409,7 +419,7 @@ async def get_streak(
 ):
     user_id = get_current_user(request)["user_id"]
     result: GetStreakResponse = await use_case.execute(user_id)
-    
+
     return StreakItem(
         current_streak=result.current_streak,
         longest_streak=result.longest_streak
@@ -417,7 +427,7 @@ async def get_streak(
 
 
 @app.post("/task", response_model=TaskResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-          summary="Начать практическую сессию", 
+          summary="Начать практическую сессию",
           description="Ментор генерирует НОВОЕ задание при каждом вызове.",
           responses={
               401: {"model": ErrorResponse, "description": "Нет токена"},
@@ -442,19 +452,19 @@ async def get_current_task(
 ):
     user_id = get_current_user(request)["user_id"]
     last_dialog = await dialog_repo.get_last_task_dialog(user_id=user_id)
-    
+
     if not last_dialog or not last_dialog.ai_response:
         return None
-        
+
     return TaskResponse(
-        question=last_dialog.ai_response, 
+        question=last_dialog.ai_response,
         question_id=last_dialog.question_id
     )
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-          summary="Сообщение ментору", 
-          description="Единственный диалог. Если передан question_id, сообщение считается ответом на задание. ИИ-детектор проверяет историю: если ответ завершен, запускается оценка (прогресс обновляется асинхронно).",
+          summary="Сообщение ментору",
+          description="Единственный диалог. Если передан question_id, сообщение считается ответом на задание.",
           responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse, "description": "Ошибка AI или БД"}})
 async def chat(
     request: Request,
@@ -472,8 +482,8 @@ async def chat(
     if data.question_id:
         answer_detected: DetectStudentsAnswerResponse = await detection_case.execute(data.question_id)
         if answer_detected.answer_found:
-            assessment = await evaluate_case.execute(data.question_id) 
-            
+            assessment = await evaluate_case.execute(data.question_id)
+
     use_case = GetChatResponseWithContext()
     result: GetChatResponseWithContextResponse = await use_case.execute(
         user_message=user_message,
@@ -486,20 +496,20 @@ async def chat(
         user_id=user_id,
         user_message=data.message,
         ai_response=result.response,
-        question_id=data.question_id, 
+        question_id=data.question_id,
         user_message_time=user_message_time,
         ai_response_time=ai_response_time,
     )
-    
+
     return ChatResponse(
-        message=result.response, 
+        message=result.response,
         question_id=data.question_id,
-        assessment=assessment 
+        assessment=assessment
     )
 
 
 @app.get("/chat/history", response_model=ChatHistoryResponse, tags=["chat"], dependencies=[Depends(bearer_docs)],
-         summary="История диалога", 
+         summary="История диалога",
          description="Возвращает последние N сообщений, отсортированные хронологически.")
 async def get_chat_history(
     request: Request,
@@ -508,24 +518,24 @@ async def get_chat_history(
 ):
     current_user = get_current_user(request)
     user_id = current_user["user_id"]
-    
+
     dialogs = await dialog_service.get_user_history(user_id=user_id, limit=limit, question_id=None)
 
     messages = []
     for dialog in dialogs:
         if dialog.user_message:
             messages.append(MessageItem(
-                id=f"{dialog.id}_user", 
-                role="user", 
-                content=dialog.user_message, 
+                id=f"{dialog.id}_user",
+                role="user",
+                content=dialog.user_message,
                 timestamp=dialog.user_message_time,
                 question_id=dialog.question_id,
             ))
         if dialog.ai_response:
             messages.append(MessageItem(
-                id=f"{dialog.id}_ai", 
-                role="ai", 
-                content=dialog.ai_response, 
+                id=f"{dialog.id}_ai",
+                role="ai",
+                content=dialog.ai_response,
                 timestamp=dialog.ai_response_time,
                 question_id=dialog.question_id
             ))
