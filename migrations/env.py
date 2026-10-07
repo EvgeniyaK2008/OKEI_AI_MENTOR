@@ -1,5 +1,6 @@
 import asyncio
 from logging.config import fileConfig
+import sys
 from config.config import Config
 
 from sqlalchemy import pool
@@ -9,6 +10,9 @@ from infrastructure.database.connection import Base
 from infrastructure.database.models import * 
 from alembic import context
 
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -68,7 +72,7 @@ async def run_async_migrations() -> None:
 
     """
     cfg = Config.load()
-    db_url = f"postgresql+asyncpg://{cfg.db_user}:{cfg.db_password}@{cfg.db_host}:{cfg.db_port}/{cfg.db_name}"
+    db_url = f"postgresql+psycopg://{cfg.db_user}:{cfg.db_password}@{cfg.db_host}:{cfg.db_port}/{cfg.db_name}"
     print(f"\n---> Пытаюсь подключиться к: {db_url}\n")
     section = config.get_section(config.config_ini_section, {})
     section["sqlalchemy.url"] = db_url
