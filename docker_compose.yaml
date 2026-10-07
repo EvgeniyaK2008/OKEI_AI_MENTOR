@@ -1,0 +1,25 @@
+services:
+  ai_mentor: 
+    image: "ghcr.io/eeisler/okei_ai_mentor/ai_mentor:latest"
+    ports: 
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+    networks:
+      - net
+  postgres: 
+    image: "postgres:17.5"
+    ports: 
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - database_data:/var/lib/postgresql/data/
+    env_file:
+      - .env
+    networks:
+      - net
+
+volumes:
+  database_data:
+
+networks:
+  net:
