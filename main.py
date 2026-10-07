@@ -35,6 +35,9 @@ from application.interactors.detect_student_answer import DetectStudentsAnswer, 
 
 from application.interactors.get_streak import GetStreak, GetStreakResponse
 from application.interactors.get_admin_stats import GetAdminStats
+from admin_panel import *
+from sqladmin import Admin
+from infrastructure.database.connection import sync_engine
 
 from domain.entities.skill_matrix import SkillMatrix
 from domain.entities.student_progress import StudentProgress
@@ -106,9 +109,9 @@ class RegisterRequest(BaseModel):
     first_name: str = Field("", description="Имя", examples=["Иван"])
     middle_name: str = Field("", description="Отчество", examples=["Иванович"])
     last_name: str = Field("", description="Фамилия", examples=["Иванов"])
-    role: Literal["student", "teacher", "admin"] = Field(
+    role: Literal["student", "teacher", "manager", "admin"] = Field(
         "student",
-        description="Роль пользователя: student (по умолчанию), teacher или admin",
+        description="Роль пользователя: student (по умолчанию), teacher или manager",
         examples=["student"]
     )
 
@@ -216,7 +219,8 @@ bearer_docs = HTTPBearer(auto_error=False)
 app = FastAPI(
     title="AI Mentor",
     servers=[
-        {"url": "http://ai-mentor.tw1.ru:8000", "description": "Продакшн сервер"}
+        {"url": "http://ai-mentor.tw1.ru:8000", "description": "Продакшн сервер"},
+        {"url": "http://127.0.0.1:8000"}
     ]
 )
 
@@ -234,6 +238,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+setup_admin(app)
 
 # ============================ ГЛОБАЛЬНАЯ ОБРАБОТКА ОШИБОК ============================
 
@@ -259,7 +264,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content=ErrorResponse(error="Внутренняя ошибка сервера. Попробуйте позже.").model_dump()
     )
-
 
 # ============================ Фабрики зависимостей ============================
 
@@ -364,10 +368,10 @@ async def get_user_streak(db: AsyncSession = Depends(get_db)) -> GetStreak:
 # ============================ Роуты ============================
 
 @app.get(
-    "/administration/stats",
+    "/manager/stats",
     response_model=AdminStatsResponse,
     tags=["stats"],
-    dependencies=[Depends(bearer_docs), Depends(require_role("admin"))],
+    dependencies=[Depends(bearer_docs), Depends(require_role("manager"))],
     summary="Статистика для администратора",
     description="Полная статистика по студентам, группам, навыкам и активности за указанный период.",
 )
@@ -414,7 +418,6 @@ async def get_me(
     )
 
 
-# --- ИСПРАВЛЕНО: Добавлены явные responses 401 и 422 ---
 @app.post("/login", response_model=LoginResponse, tags=["auth"],
           summary="Вход и получение токена",
           description="Проверяет логин/пароль и выдаёт JWT вместе с профилем пользователя.",
@@ -429,7 +432,6 @@ async def login_page(
     specialty_repo: SpecialtyRepository = Depends(get_specialty_repo),
 ):
     user = await user_repo.find_by_username(data.username)
-    logger.info('%s %s', data.password, user.hashed_password)
     if not user or not verify_password(data.password, user.hashed_password):
         return JSONResponse(status_code=401, content=ErrorResponse(error="Invalid credentials").model_dump())
 
@@ -456,7 +458,6 @@ async def login_page(
     )
 
 
-# --- ИСПРАВЛЕНО: Добавлены явные responses 409 и 422 ---
 @app.post("/register", response_model=RegisterResponse, status_code=201, tags=["auth"],
           summary="Регистрация пользователя",
           description="Создаёт нового пользователя. Роль назначается через параметр (по умолчанию student). Ошибка 409 — логин уже занят.",
@@ -685,3 +686,5 @@ async def get_chat_history(
     messages.reverse()
 
     return ChatHistoryResponse(user_id=user_id, username=current_user["username"], messages=messages)
+
+

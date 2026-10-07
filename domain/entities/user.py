@@ -9,6 +9,7 @@ from typing import Optional, Any
 class UserRole(Enum):
     STUDENT = "student"
     TEACHER = "teacher"
+    MANAGER = 'manager'
     ADMIN = "admin"
 
 @dataclass

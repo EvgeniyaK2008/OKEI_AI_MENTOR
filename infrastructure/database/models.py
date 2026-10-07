@@ -11,6 +11,9 @@ class DepartmentModel(Base):
     
     specialties: Mapped[list["SpecialtyModel"]] = relationship(back_populates="department")
 
+    def __str__(self):
+        return f"{self.name}"
+
 
 class SpecialtyModel(Base):
     __tablename__ = 'specialties'
@@ -25,6 +28,8 @@ class SpecialtyModel(Base):
     groups: Mapped[list["GroupModel"]] = relationship(back_populates="specialty")
     skill: Mapped[list['SkillMatrixModel']] = relationship(back_populates='specialty')
 
+    def __str__(self):
+        return f"{self.short_name}"
 
 class GroupModel(Base):
     __tablename__ = 'groups'
@@ -36,8 +41,11 @@ class GroupModel(Base):
     group_number: Mapped[int] = mapped_column(BigInteger)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True) 
 
-    specialty: Mapped['SpecialtyModel'] = relationship(back_populates='groups') 
+    specialty: Mapped["SpecialtyModel"] = relationship(back_populates='groups', lazy="joined") 
     users: Mapped[list["UserModel"]] = relationship(back_populates='group')
+
+    def __str__(self):
+        return f"{self.year}{self.specialty}{self.group_number}"
 
 
 class UserModel(Base):
@@ -59,6 +67,9 @@ class UserModel(Base):
     dialog: Mapped[list["DialogModel"]] = relationship("DialogModel", back_populates='user')
     student_progress: Mapped[list['StudentProgressModel']] = relationship('StudentProgressModel', back_populates='student')
 
+    def __str__(self):
+        return f"{self.first_name} {self.middle_name} {self.last_name}"
+
 
 class DialogModel(Base):
     __tablename__ = 'dialogs'
@@ -73,6 +84,7 @@ class DialogModel(Base):
 
     user: Mapped["UserModel"] = relationship("UserModel", back_populates='dialog')
 
+
 class DeciplineModel(Base):
     __tablename__ = 'deciplines'
 
@@ -82,6 +94,9 @@ class DeciplineModel(Base):
     course: Mapped[int] = mapped_column(BigInteger)
 
     skill: Mapped[list["SkillMatrixModel"]] = relationship(back_populates="decipline")
+
+    def __str__(self):
+        return f"{self.name}"
 
 class SkillMatrixModel(Base):
     __tablename__ = 'skills'
@@ -101,7 +116,10 @@ class SkillMatrixModel(Base):
 
     specialty: Mapped["SpecialtyModel"] = relationship("SpecialtyModel", back_populates='skill')
     decipline: Mapped["DeciplineModel"] = relationship("DeciplineModel", back_populates='skill')
+    student_progress: Mapped["StudentProgressModel"] = relationship("StudentProgressModel", back_populates="skill")
 
+    def __str__(self):
+        return f"{self.skill}"
 
 class StudentProgressModel(Base):
     __tablename__ = 'student_progress'     
@@ -114,3 +132,7 @@ class StudentProgressModel(Base):
     weaknesses: Mapped[str | None] = mapped_column(Text)
 
     student: Mapped["UserModel"] = relationship("UserModel", back_populates='student_progress')
+    skill: Mapped["SkillMatrixModel"] = relationship("SkillMatrixModel", back_populates='student_progress')
+
+    def __str__(self):
+        return f"{self.level}"

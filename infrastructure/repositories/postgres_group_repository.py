@@ -51,15 +51,27 @@ class AsyncPostgresGroupRepository(GroupRepository):
 
     async def find_by_id(self, group_id: int) -> Optional[Groups]:
         result = await self.session.execute(
-            select(GroupModel).where(GroupModel.id == group_id)
+            select(GroupModel)
+            .options(joinedload(GroupModel.specialty))  
+            .where(GroupModel.id == group_id)
         )
         row = result.scalar_one_or_none()
         if not row:
             return None
+        
+        specialty = None
+        if row.specialty:
+            specialty = Specialty(
+                id=row.specialty.id,
+                code=row.specialty.code,
+                short_name=row.specialty.short_name,
+                full_name=row.specialty.full_name,
+            )
+        
         return Groups(
             id=row.id,
             year=row.year,
-            specialty=Specialty(id=row.specialty_id) if row.specialty_id else None,
+            specialty=specialty,
             group_number=row.group_number,
             is_active=row.is_active
         )
@@ -67,16 +79,29 @@ class AsyncPostgresGroupRepository(GroupRepository):
     async def find_by_specialty(self, specialty_id: int) -> List[Groups]:
         result = await self.session.execute(
             select(GroupModel)
+            .options(joinedload(GroupModel.specialty)) 
             .where(GroupModel.specialty_id == specialty_id)
             .order_by(desc(GroupModel.year))
         )
-        return [
-            Groups(
-                id=r.id, year=r.year, 
-                specialty=Specialty(id=r.specialty_id) if r.specialty_id else None,
-                group_number=r.group_number, is_active=r.is_active
-            ) for r in result.scalars().all()
-        ]
+        
+        groups = []
+        for r in result.scalars().all():
+            specialty = None
+            if r.specialty:
+                specialty = Specialty(
+                    id=r.specialty.id,
+                    code=r.specialty.code,
+                    short_name=r.specialty.short_name,
+                    full_name=r.specialty.full_name,
+                )
+            groups.append(Groups(
+                id=r.id, 
+                year=r.year, 
+                specialty=specialty,
+                group_number=r.group_number, 
+                is_active=r.is_active
+            ))
+        return groups
 
     async def find_active_groups(self) -> List[Groups]:
         result = await self.session.execute(
@@ -85,32 +110,52 @@ class AsyncPostgresGroupRepository(GroupRepository):
             .options(joinedload(GroupModel.specialty))
             .order_by(desc(GroupModel.year))
         )
-        return [
-            Groups(
+        
+        groups = []
+        for r in result.scalars().all():
+            specialty = None
+            if r.specialty:
+                specialty = Specialty(
+                    id=r.specialty.id,
+                    code=r.specialty.code,
+                    short_name=r.specialty.short_name,
+                    full_name=r.specialty.full_name,
+                )
+            groups.append(Groups(
                 id=r.id, 
                 year=r.year, 
-                specialty=Specialty(
-                    id=r.specialty.id, 
-                    short_name=r.specialty.short_name
-                ) if r.specialty else None,
+                specialty=specialty,
                 group_number=r.group_number, 
                 is_active=r.is_active
-            ) for r in result.scalars().all()
-        ]
+            ))
+        return groups
 
     async def find_by_year(self, year: int) -> List[Groups]:
         result = await self.session.execute(
             select(GroupModel)
+            .options(joinedload(GroupModel.specialty))  
             .where(GroupModel.year == year)
             .order_by(desc(GroupModel.year))
         )
-        return [
-            Groups(
-                id=r.id, year=r.year, 
-                specialty=Specialty(id=r.specialty_id) if r.specialty_id else None,
-                group_number=r.group_number, is_active=r.is_active
-            ) for r in result.scalars().all()
-        ]
+        
+        groups = []
+        for r in result.scalars().all():
+            specialty = None
+            if r.specialty:
+                specialty = Specialty(
+                    id=r.specialty.id,
+                    code=r.specialty.code,
+                    short_name=r.specialty.short_name,
+                    full_name=r.specialty.full_name,
+                )
+            groups.append(Groups(
+                id=r.id, 
+                year=r.year, 
+                specialty=specialty,
+                group_number=r.group_number, 
+                is_active=r.is_active
+            ))
+        return groups
 
     async def delete(self, group_id: int) -> bool:
         try:
