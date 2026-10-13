@@ -62,7 +62,7 @@ class AsyncPostgresDepartmentRepository(DepartmentRepository):
 
     async def delete(self, department_id: int) -> bool:
         try:
-           count_res = await self.session.execute(
+            count_res = await self.session.execute(
                 select(func.count())
                 .select_from(SpecialtyModel)
                 .where(SpecialtyModel.department_id == department_id)

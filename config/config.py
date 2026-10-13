@@ -2,6 +2,7 @@
 import os
 from dataclasses import dataclass, field
 from typing import Self
+
 from dotenv import load_dotenv
 
 
@@ -14,7 +15,6 @@ class DbHostMissing(ConfigError):
 
 @dataclass
 class AIModelConfig:
-    """Конфигурация одной ИИ-модели: провайдер, модель, параметры генерации."""
     cloud_folder: str
     api_key: str
     model: str
@@ -25,7 +25,6 @@ class AIModelConfig:
 
     @classmethod
     def load(cls, prefix: str) -> Self:
-        """Читает переменные окружения с указанным префиксом: MENTOR_* или SECONDARY_*."""
         return cls(
             cloud_folder=os.getenv(f"{prefix}_YANDEX_CLOUD_FOLDER", ""),
             api_key=os.getenv(f"{prefix}_YANDEX_CLOUD_API_KEY", ""),
@@ -39,8 +38,9 @@ class AIModelConfig:
 
 @dataclass
 class Config:
-    mentor_ai: AIModelConfig      # основная модель-ментор: диалог, генерация заданий
-    secondary_ai: AIModelConfig   # вспомогательная модель: оценка, классификация
+    load_dotenv()
+    mentor_ai: AIModelConfig      
+    secondary_ai: AIModelConfig  
 
     db_host: str
     db_port: int
@@ -52,7 +52,6 @@ class Config:
 
     @classmethod
     def load(cls) -> Self:
-        load_dotenv()
 
         instance = cls(
             mentor_ai=AIModelConfig.load("MENTOR"),
@@ -72,6 +71,5 @@ class Config:
         return instance
 
     def validate(self):
-        if not self.db_host:
-             raise DbHostMissing
+        pass
         

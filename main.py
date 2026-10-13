@@ -1,8 +1,7 @@
 # main.py
 import logging
-from dotenv import load_dotenv
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, Request, Depends, Query, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -10,34 +9,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.config import Config
 
-from infrastructure.database.connection import get_db
-from infrastructure.repositories.postgres_user_repository import AsyncPostgresUserRepository
-from infrastructure.repositories.postgres_skill_matrix_repository import AsyncPostgresSkillMatrixRepository
-from infrastructure.repositories.postgres_student_progress_repository import AsyncPostgresStudentProgressRepository
-from infrastructure.repositories.postgres_group_repository import AsyncPostgresGroupRepository
-from infrastructure.repositories.postgres_dialog_repository import AsyncPostgresDialogRepository
-from infrastructure.repositories.postgres_specialty_repository import AsyncPostgresSpecialtyRepository
-
-from infrastructure.ai.yandex_ai_service import YandexAIMainModelService
 from application.services.user_service import UserService
 from application.services.dialog_service import DialogService
 from application.services.auth import hash_password, verify_password, create_access_token, get_current_user, require_role
 
 from application.interactors.start_skill_session import StartSkillSession
-from application.interactors.get_skill_for_student import GetSkillForStudent
 from application.interactors.get_chat_response import GetChatResponseWithContext, UserMessage, GetChatResponseWithContextResponse
-from application.interactors.evaluate_student_answer import EvaluateStudentAnswer, EvaluateStudentAnswerResponse
+from application.interactors.evaluate_student_answer import EvaluateStudentAnswer
 from application.interactors.detect_student_answer import DetectStudentsAnswer, DetectStudentsAnswerResponse
 
 from application.interactors.get_streak import GetStreak, GetStreakResponse
 from application.interactors.get_admin_stats import GetAdminStats
-from admin_panel import *
-from sqladmin import Admin
-from infrastructure.database.connection import sync_engine
+from infrastructure.repositories.postgres_group_repository import AsyncPostgresGroupRepository
+from presentation.web.fastapi.admin_panel import *
 
 from domain.entities.skill_matrix import SkillMatrix
 from domain.entities.student_progress import StudentProgress
@@ -48,166 +35,17 @@ from application.repositories.specialty_repository import SpecialtyRepository
 from application.repositories.skill_matrix_repository import SkillMatrixRepository
 from application.repositories.student_progress_repository import StudentProgressRepository
 from application.repositories.dialog_repository import DialogRepository
-from application.repositories.stats_repository import StatsRepository
 from application.ports.ai.ai_port import AIService
-from infrastructure.repositories.postgres_stats_repository import AsyncPostgresStatsRepository
-
-
-# ============================ Pydantic-модели ============================
-
-class SkillStatsItem(BaseModel):
-    skill_id: int = Field(description="ID навыка", examples=[19])
-    skill: str = Field(description="Название навыка", examples=["Оптимизация гиперпараметров"])
-    avg_level: float = Field(description="Средний процент освоения навыка среди студентов", examples=[61.3])
-    students_count: int = Field(description="Количество студентов, у которых есть этот навык", examples=[26])
-
-
-class GroupActivityItem(BaseModel):
-    group_id: int = Field(description="ID группы", examples=[1])
-    group_name: str = Field(description="Название группы", examples=["3ии1"])
-    total_messages: int = Field(description="Общее количество сообщений в группе", examples=[1057])
-    total_tasks: int = Field(description="Общее количество выданных заданий в группе", examples=[694])
-
-
-class GroupTasksItem(BaseModel):
-    group_id: int = Field(description="ID группы", examples=[1])
-    group_name: str = Field(description="Название группы", examples=["3ии1"])
-    completed_tasks: int = Field(description="Количество выполненных заданий", examples=[694])
-    active_students: int = Field(description="Количество студентов, выполнивших хотя бы одно задание", examples=[30])
-
-
-class DailyActivityItem(BaseModel):
-    day: str = Field(description="Дата в формате YYYY-MM-DD", examples=["2026-10-05"])
-    group_id: int = Field(description="ID группы", examples=[1])
-    group_name: str = Field(description="Название группы", examples=["3ии1"])
-    messages_count: int = Field(description="Количество сообщений в этот день", examples=[14])
-
-
-class AdminStatsResponse(BaseModel):
-    total_students: int = Field(description="Общее количество студентов")
-    active_groups_count: int = Field(description="Количество активных групп")
-    avg_progress_by_skill: list[SkillStatsItem] = Field(description="Средний прогресс по каждому навыку")
-    weakest_skills: list[SkillStatsItem] = Field(description="Топ-5 самых слабых навыков")
-    activity_by_group: list[GroupActivityItem] = Field(description="Активность групп: сообщения и задания")
-    completed_tasks_by_group: list[GroupTasksItem] = Field(description="Решённые задания по группам")
-    daily_activity: list[DailyActivityItem] = Field(description="Ежедневная активность для тепловой карты")
-
-
-class ErrorResponse(BaseModel):
-    error: str = Field(description="Описание ошибки", examples=["Username already exists"])
-
-
-class LoginRequest(BaseModel):
-    username: str = Field(examples=["ii"])
-    password: str = Field(examples=["ii"])
-
-
-class RegisterRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=32, description="Логин пользователя, уникален", examples=["ivanov"])
-    password: str = Field(min_length=8, description="Пароль, хранится только в виде хэша", examples=["supersecret1"])
-    group_id: int | None = Field(None, description="ID учебной группы из GET /groups.", examples=[3])
-    first_name: str = Field("", description="Имя", examples=["Иван"])
-    middle_name: str = Field("", description="Отчество", examples=["Иванович"])
-    last_name: str = Field("", description="Фамилия", examples=["Иванов"])
-    role: Literal["student", "teacher", "manager", "admin"] = Field(
-        "student",
-        description="Роль пользователя: student (по умолчанию), teacher или manager",
-        examples=["student"]
-    )
-
-
-class RegisterResponse(BaseModel):
-    user_id: int = Field(examples=[11])
-    username: str = Field(examples=["ivanov"])
-
-
-class UserPublic(BaseModel):
-    id: int = Field(examples=[11])
-    username: str = Field(examples=["ivanov"])
-    first_name: str = Field(examples=["Иван"])
-    middle_name: str = Field(examples=["Иванович"])
-    last_name: str = Field(examples=["Иванов"])
-    group: str = Field(description="Название группы", examples=["2ИИ1"])
-    role: str = Field(description="Роль пользователя", examples=["student"])
-    current_streak: int = Field(description="Текущая серия дней выполнения заданий", examples=[5])
-    longest_streak: int = Field(description="Рекорд серии дней", examples=[12])
-
-
-class LoginResponse(BaseModel):
-    token: str = Field(description="JWT Bearer-токен.", examples=["eyJhbGciOiJIUzI1NiIs..."])
-    user: UserPublic
-
-
-class GroupItem(BaseModel):
-    id: int = Field(description="ID учебной группы", examples=[3])
-    name: str = Field(description="Человекочитаемое имя", examples=["2ИИ1"])
-
-
-class StreakItem(BaseModel):
-    current_streak: int = Field(description="Текущая серия дней", examples=[5])
-    longest_streak: int = Field(description="Рекорд серии дней", examples=[12])
-
-
-class SkillItem(BaseModel):
-    id: int = Field(examples=[35])
-    name: str = Field(description="Название навыка", examples=["Введение в ИИ"])
-    description: str | None = Field(None, description="Критерии освоения")
-
-
-class ProgressItem(BaseModel):
-    skill_id: int = Field(description="ID навыка")
-    skill: str = Field(description="Название навыка", examples=["Введение в ИИ"])
-    level: int = Field(ge=0, le=100, description="Процент освоения", examples=[50])
-    weaknesses: str | None = Field(None, description="Слабые места студента в теме", examples=["Не понимает синтаксис функций"])
-
-
-class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=4000, description="Сообщение ментору", examples=["Объясни, чем список отличается от кортежа"])
-    question_id: str | None = Field(
-        None, 
-        description="ID практической сессии из POST /task. Если передан, сообщение считается ответом на задание и запускает оценку. Если null — обычный чат.", 
-        examples=["8f2a4c1e-..."]
-    )
-
-
-class ChatResponse(BaseModel):
-    message: str = Field(description="Ответ ментора", examples=["Верно мыслишь."])
-    question_id: str | None = Field(None, description="ID сессии", examples=["8f2a4c1e-..."])
-    assessment: EvaluateStudentAnswerResponse | None = Field(
-        None, 
-        description="Результат оценки (level, feedback, skill_id). Если присутствует, задание считается выполненным."
-    )
-    task_completed: bool = Field(
-        False, 
-        description="True, если задание оценено и закрыто. Фронтенд должен сбросить активный question_id."
-    )
-
-
-class TaskResponse(BaseModel):
-    question: str = Field(description="Текст задания", examples=["Напишите функцию..."])
-    question_id: str = Field(description="ID сессии задания", examples=["8f2a4c1e-..."])
-
-
-class MessageItem(BaseModel):
-    id: str = Field(description="Уникальный ключ", examples=["12user"])
-    role: Literal["user", "ai"] = Field(description="Автор: user или ai")
-    content: str = Field(examples=["Объясни, чем список отличается от кортежа"])
-    timestamp: datetime | None = Field(
-        None, 
-        description="Время создания сообщения. Null только у служебных записей (например, у выданного задания без ответа студента)."
-    )
-    question_id: str | None = Field(None, description="ID задания, если сообщение к нему относится")
-
-
-class ChatHistoryResponse(BaseModel):
-    user_id: int = Field(examples=[11])
-    username: str = Field(examples=["ivanov"])
-    messages: list[MessageItem] = Field(
-        description="Список сообщений, отсортированных хронологически (старые сверху, новые снизу)."
-    )
+from infrastructure.dependency_fabrics import get_container
+from presentation.web.fastapi.models import *
 
 
 # ============================ Приложение ============================
+
+CurrentUser = Annotated[dict, Depends(get_current_user)]
+StudentUser = Annotated[dict, Depends(require_role("student"))]
+ManagerUser = Annotated[dict, Depends(require_role("manager"))]
+
  
 config = Config.load()
 
@@ -215,6 +53,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 bearer_docs = HTTPBearer(auto_error=False)
+container = get_container()
 
 app = FastAPI(
     title="AI Mentor",
@@ -265,142 +104,34 @@ async def global_exception_handler(request: Request, exc: Exception):
         content=ErrorResponse(error="Внутренняя ошибка сервера. Попробуйте позже.").model_dump()
     )
 
-# ============================ Фабрики зависимостей ============================
-
-async def get_stats_repo(db: AsyncSession = Depends(get_db)) -> StatsRepository:
-    return AsyncPostgresStatsRepository(db)
-
-async def get_admin_stats(stats_repo: StatsRepository = Depends(get_stats_repo)) -> GetAdminStats:
-    return GetAdminStats(stats_repo=stats_repo)
-
-async def get_user_repo(db: AsyncSession = Depends(get_db)) -> UserRepository:
-    return AsyncPostgresUserRepository(db)
-
-async def get_group_repo(db: AsyncSession = Depends(get_db)) -> GroupRepository:
-    return AsyncPostgresGroupRepository(db)
-
-async def get_specialty_repo(db: AsyncSession = Depends(get_db)) -> SpecialtyRepository:
-    return AsyncPostgresSpecialtyRepository(db)
-
-async def get_student_progress_repo(db: AsyncSession = Depends(get_db)) -> StudentProgressRepository:
-    return AsyncPostgresStudentProgressRepository(db)
-
-async def get_matrix_repo(db: AsyncSession = Depends(get_db)) -> SkillMatrixRepository:
-    return AsyncPostgresSkillMatrixRepository(db)
-
-async def get_dialog_repo(db: AsyncSession = Depends(get_db)) -> DialogRepository:
-    return AsyncPostgresDialogRepository(db)
-
-async def get_dialog_service(db: AsyncSession = Depends(get_db)) -> DialogService:
-    return DialogService(AsyncPostgresDialogRepository(db))
-
-async def get_user_service(db: AsyncSession = Depends(get_db)) -> UserService:
-    return UserService(
-        AsyncPostgresUserRepository(db),
-        AsyncPostgresSkillMatrixRepository(db),
-        AsyncPostgresStudentProgressRepository(db)
-    )
-
-async def get_ai_mentor(db: AsyncSession = Depends(get_db)) -> AIService:
-    return YandexAIMainModelService(config.mentor_ai)
-
-async def get_ai_secondary(db: AsyncSession = Depends(get_db)) -> AIService:
-    return YandexAIMainModelService(config.secondary_ai)
-
-async def get_get_skill_for_student(db: AsyncSession = Depends(get_db)) -> GetSkillForStudent:
-    return GetSkillForStudent(
-        student_progress_repo=AsyncPostgresStudentProgressRepository(db),
-        skill_matrix_repo=AsyncPostgresSkillMatrixRepository(db),
-        user_repo=AsyncPostgresUserRepository(db)
-    )
-
-async def get_start_skill_session(db: AsyncSession = Depends(get_db)) -> StartSkillSession:
-    user_repo = AsyncPostgresUserRepository(db)
-    skill_matrix_repo = AsyncPostgresSkillMatrixRepository(db)
-    student_progress_repo = AsyncPostgresStudentProgressRepository(db)
-    specialty_repo = AsyncPostgresSpecialtyRepository(db)
-    dialog_repo = AsyncPostgresDialogRepository(db)
-    group_repo = AsyncPostgresGroupRepository(db)
-
-    return StartSkillSession(
-        ai_service=YandexAIMainModelService(config.mentor_ai),
-        dialog_service=DialogService(dialog_repo),
-        user_repo=user_repo,
-        get_skill_for_student=GetSkillForStudent(
-            student_progress_repo=student_progress_repo,
-            skill_matrix_repo=skill_matrix_repo,
-            user_repo=user_repo,
-        ),
-        student_progress_repo=student_progress_repo,
-        specialty_repo=specialty_repo,
-        group_repo=group_repo
-    )
-
-async def get_evaluate_student_answer(db: AsyncSession = Depends(get_db)) -> EvaluateStudentAnswer:
-    dialog_repo = AsyncPostgresDialogRepository(db)
-    student_progress_repo = AsyncPostgresStudentProgressRepository(db)
-    skill_matrix_repo = AsyncPostgresSkillMatrixRepository(db)
-    user_repo = AsyncPostgresUserRepository(db)
-
-    return EvaluateStudentAnswer(
-        dialog_service=DialogService(dialog_repo),
-        student_progress_repo=student_progress_repo,
-        get_skill_for_student=GetSkillForStudent(
-            student_progress_repo=student_progress_repo,
-            skill_matrix_repo=skill_matrix_repo,
-            user_repo=user_repo
-        ),
-        dialog_repo=dialog_repo,
-        ai_service=YandexAIMainModelService(config.secondary_ai),
-        user_repo=user_repo,
-    )
-
-async def get_detect_students_answer(db: AsyncSession = Depends(get_db)) -> DetectStudentsAnswer:
-    return DetectStudentsAnswer(
-        ai_service=YandexAIMainModelService(config.secondary_ai),
-        dialog_repo=AsyncPostgresDialogRepository(db)
-    )
-
-async def get_user_streak(db: AsyncSession = Depends(get_db)) -> GetStreak:
-    return GetStreak(user_repo=AsyncPostgresUserRepository(db))
-
-
 # ============================ Роуты ============================
 
 @app.get(
     "/manager/stats",
     response_model=AdminStatsResponse,
     tags=["stats"],
-    dependencies=[Depends(bearer_docs), Depends(require_role("manager"))],
+    dependencies=[Depends(require_role("manager"))],
     summary="Статистика для администратора",
     description="Полная статистика по студентам, группам, навыкам и активности за указанный период.",
 )
 async def get_admin_stats_endpoint(
     days: int = Query(30, ge=1, le=365, description="Период для daily_activity в днях"),
-    use_case: GetAdminStats = Depends(get_admin_stats),
+    use_case: GetAdminStats = Depends(container.get_admin_stats),
 ):
     result = await use_case.execute(days=days)
-    return AdminStatsResponse(
-        total_students=result.total_students,
-        active_groups_count=result.active_groups_count,
-        avg_progress_by_skill=result.avg_progress_by_skill,
-        weakest_skills=result.weakest_skills,
-        activity_by_group=result.activity_by_group,
-        completed_tasks_by_group=result.completed_tasks_by_group,
-        daily_activity=result.daily_activity,
-    )
+    return result
 
-
+# исправить
 @app.get('/me', response_model=UserPublic, tags=["auth"], dependencies=[Depends(bearer_docs)],
          summary="Текущий пользователь", 
          description="Возвращает профиль текущего пользователя по JWT-токену: ID, логин, ФИО, группа, роль и стрик.")
 async def get_me(
-    request: Request,
-    user_repo: UserRepository = Depends(get_user_repo),
-    group_repo: GroupRepository = Depends(get_group_repo),
-    specialty_repo: SpecialtyRepository = Depends(get_specialty_repo),
+    current_user: CurrentUser,
+    user_repo: UserRepository = Depends(container.get_user_repo),
+    group_repo: GroupRepository = Depends(container.get_group_repo),
+    specialty_repo: SpecialtyRepository = Depends(container.get_specialty_repo),
 ):
-    user_id = get_current_user(request)["user_id"]
+    user_id = current_user["user_id"]
     user = await user_repo.find_by_id(user_id)
     group_name = ""
     if user.group is not None:
@@ -418,6 +149,7 @@ async def get_me(
     )
 
 
+# исправить
 @app.post("/login", response_model=LoginResponse, tags=["auth"],
           summary="Вход и получение токена",
           description="Проверяет логин/пароль и выдаёт JWT вместе с профилем пользователя.",
@@ -427,9 +159,9 @@ async def get_me(
           })
 async def login_page(
     data: LoginRequest,
-    user_repo: UserRepository = Depends(get_user_repo),
-    group_repo: GroupRepository = Depends(get_group_repo),
-    specialty_repo: SpecialtyRepository = Depends(get_specialty_repo),
+    user_repo: UserRepository = Depends(container.get_user_repo),
+    group_repo: GroupRepository = Depends(container.get_group_repo),
+    specialty_repo: SpecialtyRepository = Depends(container.get_specialty_repo),
 ):
     user = await user_repo.find_by_username(data.username)
     if not user or not verify_password(data.password, user.hashed_password):
@@ -457,7 +189,7 @@ async def login_page(
         ),
     )
 
-
+# исправить
 @app.post("/register", response_model=RegisterResponse, status_code=201, tags=["auth"],
           summary="Регистрация пользователя",
           description="Создаёт нового пользователя. Роль назначается через параметр (по умолчанию student). Ошибка 409 — логин уже занят.",
@@ -467,9 +199,9 @@ async def login_page(
           })
 async def register(
     data: RegisterRequest,
-    service: UserService = Depends(get_user_service),
-    user_repo: UserRepository = Depends(get_user_repo),
-    group_repo: GroupRepository = Depends(get_group_repo),
+    service: UserService = Depends(container.get_user_service),
+    user_repo: UserRepository = Depends(container.get_user_repo),
+    group_repo: GroupRepository = Depends(container.get_group_repo),
 ):
     existing = await user_repo.find_by_username(data.username)
     if existing:
@@ -482,21 +214,20 @@ async def register(
     user = await service.get_or_create_user(
         username=data.username, hashed_password=hash_password(data.password),
         first_name=data.first_name, middle_name=data.middle_name, last_name=data.last_name,
-        group=group, role=data.role,
+        group=group, role=UserRole.STUDENT,
     )
     return RegisterResponse(user_id=user.id, username=user.username)
 
 
 @app.get("/skills", response_model=list[SkillItem], tags=["study"], 
-         dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
          summary="Каталог навыков",
          description="Возвращает все навыки матрицы компетенций для курса и специальности текущего студента.")
 async def get_skills(
-    request: Request,
-    user_repo: UserRepository = Depends(get_user_repo),
-    matrix_repo: SkillMatrixRepository = Depends(get_matrix_repo),
+    user: StudentUser,
+    user_repo: UserRepository = Depends(container.get_user_repo),
+    matrix_repo: SkillMatrixRepository = Depends(container.get_matrix_repo),
 ):
-    user_id = get_current_user(request)["user_id"]
+    user_id = user["user_id"]
     user: User = await user_repo.find_by_id(user_id)
     course: int = user.get_course()
     specialty_id: int = user.get_specialty_id()
@@ -509,11 +240,11 @@ async def get_skills(
          summary="Прогресс студента",
          description="Возвращает проценты освоения навыков (0–100) и слабые места по каждому навыку. Обновляется после оценки задания.")
 async def get_progress(
-    request: Request,
-    student_progress_repo: StudentProgressRepository = Depends(get_student_progress_repo),
-    matrix_repo: SkillMatrixRepository = Depends(get_matrix_repo),
+    student: StudentUser,
+    student_progress_repo: StudentProgressRepository = Depends(container.get_student_progress_repo),
+    matrix_repo: SkillMatrixRepository = Depends(container.get_matrix_repo),
 ):
-    user_id = get_current_user(request)["user_id"]
+    user_id = StudentUser["user_id"]
     student_progress: list[StudentProgress] = await student_progress_repo.find_by_student_id(user_id)
 
     result = []
@@ -531,7 +262,7 @@ async def get_progress(
 @app.get("/groups", response_model=list[GroupItem], tags=["study"],
          summary="Список учебных групп",
          description="Активные группы колледжа для выбора при регистрации.")
-async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_group_repo)):
+async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(container.get_group_repo)):
     groups = await group_repo.find_active_groups()
     return [
         GroupItem(id=g.id, name=f"{datetime.now().year - g.year + 1}{g.specialty.short_name}{g.group_number}")
@@ -545,7 +276,7 @@ async def get_groups(group_repo: AsyncPostgresGroupRepository = Depends(get_grou
          description="Возвращает текущую и максимальную серию дней выполнения заданий. Обновляется автоматически при успешной оценке задания.")
 async def get_streak(
     request: Request,
-    use_case: GetStreak = Depends(get_user_streak)
+    use_case: GetStreak = Depends(container.get_user_streak)
 ):
     user_id = get_current_user(request)["user_id"]
     result: GetStreakResponse = await use_case.execute(user_id)
@@ -566,24 +297,23 @@ async def get_streak(
               503: {"model": ErrorResponse, "description": "Нет доступных навыков для генерации задания"}
           })
 async def start_task(
-    request: Request,
-    task_case: StartSkillSession = Depends(get_start_skill_session),
+    student: StudentUser,
+    task_case: StartSkillSession = Depends(container.get_start_skill_session),
 ):
-    user_id = get_current_user(request)["user_id"]
+    user_id = StudentUser["user_id"]
     result = await task_case.execute(user_id)
-    return TaskResponse(question=result.question, question_id=result.question_id)
+    return result
 
 
 @app.get("/task/current", response_model=TaskResponse | None, tags=["chat"], 
-         dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
          summary="Текущее активное задание",
          description="Возвращает последнее выданное задание, если оно есть. Если активного задания нет, возвращает null. Используется для восстановления состояния после перезагрузки страницы.",
          responses={401: {"model": ErrorResponse, "description": "Нет токена или неверная роль"}})
 async def get_current_task(
-    request: Request,
-    dialog_repo: DialogRepository = Depends(get_dialog_repo)
+    student: StudentUser,
+    dialog_repo: DialogRepository = Depends(container.get_dialog_repo)
 ):
-    user_id = get_current_user(request)["user_id"]
+    user_id = student["user_id"]
     last_dialog = await dialog_repo.get_last_task_dialog(user_id=user_id)
 
     if not last_dialog or not last_dialog.ai_response:
@@ -596,7 +326,6 @@ async def get_current_task(
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"], 
-          dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
           summary="Сообщение ментору",
           description="Единственный диалог студента с ментором. Если передан question_id, сообщение считается ответом на задание и запускает ИИ-детектор. Если детектор распознаёт ответ, запускается оценка (прогресс и стрик обновляются автоматически). Если assessment не null — задание считается выполненным, фронтенд должен сбросить активный question_id.",
           responses={
@@ -605,14 +334,14 @@ async def get_current_task(
               500: {"model": ErrorResponse, "description": "Ошибка AI или БД"}
           })
 async def chat(
-    request: Request,
+    student: StudentUser,
     data: ChatRequest,
-    dialog_service: DialogService = Depends(get_dialog_service),
-    ai_service: AIService = Depends(get_ai_mentor),
-    detection_case: DetectStudentsAnswer = Depends(get_detect_students_answer),
-    evaluate_case: EvaluateStudentAnswer = Depends(get_evaluate_student_answer)
+    dialog_service: DialogService = Depends(container.get_dialog_service),
+    ai_service: AIService = Depends(container.get_ai_mentor),
+    detection_case: DetectStudentsAnswer = Depends(container.get_detect_students_answer),
+    evaluate_case: EvaluateStudentAnswer = Depends(container.get_evaluate_student_answer)
 ):
-    user_id: int = get_current_user(request)["user_id"]
+    user_id: int = student["user_id"]
     user_message = UserMessage(user_id=user_id, message=data.message)
     user_message_time: datetime = datetime.now()
     assessment = None
@@ -648,7 +377,6 @@ async def chat(
 
 
 @app.get("/chat/history", response_model=ChatHistoryResponse, tags=["chat"], 
-         dependencies=[Depends(bearer_docs), Depends(require_role("student"))],
          summary="История диалога",
          description="Возвращает последние N сообщений, отсортированных хронологически (старые сверху, новые снизу). Параметр limit ограничивает количество возвращаемых сообщений (по умолчанию 50, максимум 200).",
          responses={
@@ -656,12 +384,11 @@ async def chat(
              422: {"model": ErrorResponse, "description": "Ошибка валидации параметра limit"}
          })
 async def get_chat_history(
-    request: Request,
+    student: StudentUser,
     limit: int = Query(50, ge=1, le=200, description="Сколько сообщений вернуть"),
-    dialog_service: DialogService = Depends(get_dialog_service),
+    dialog_service: DialogService = Depends(container.get_dialog_service),
 ):
-    current_user = get_current_user(request)
-    user_id = current_user["user_id"]
+    user_id = student["user_id"]
 
     dialogs = await dialog_service.get_user_history(user_id=user_id, limit=limit, question_id=None)
 
@@ -685,6 +412,4 @@ async def get_chat_history(
             ))
     messages.reverse()
 
-    return ChatHistoryResponse(user_id=user_id, username=current_user["username"], messages=messages)
-
-
+    return ChatHistoryResponse(user_id=user_id, username=student["username"], messages=messages)

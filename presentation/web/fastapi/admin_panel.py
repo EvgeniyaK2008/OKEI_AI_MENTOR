@@ -105,34 +105,21 @@ class AdminAuth(AuthenticationBackend):
     async def login(self, request: Request):
         form = await request.form()
         
-        # ИСПРАВЛЕНО: используем .get() вместо [] для безопасного доступа
         username = form.get("username")
         password = form.get("password")
 
         if not username or not password:
-            print("❌ Отсутствует username или password в форме")
             return False
 
-        # ИСПРАВЛЕНО: создаём сессию из фабрики, а не передаём engine
         from infrastructure.database.connection import async_session_factory
         
         async with async_session_factory() as session:
             user_repo = AsyncPostgresUserRepository(session=session)
             user = await user_repo.find_by_username(username)
 
-            if not user:
-                print(f"❌ Пользователь {username} не найден")
-                return False
-            
-            if user.role != UserRole.ADMIN:
-                print(f"❌ Пользователь {username} не является админом (роль: {user.role})")
-                return False
-            
-            if not verify_password(password, user.hashed_password):
-                print(f"❌ Неверный пароль для {username}")
+            if not user or user.role != UserRole.ADMIN or not verify_password(password, user.hashed_password):
                 return False
 
-        print(f"✅ Успешный вход: {username}")
         request.session.update({"authenticated": True})
         return True
     
